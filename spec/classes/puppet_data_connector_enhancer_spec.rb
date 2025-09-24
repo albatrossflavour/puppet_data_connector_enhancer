@@ -21,20 +21,21 @@ describe 'puppet_data_connector_enhancer' do
         }
 
         it {
-          is_expected.to contain_cron('puppet_data_connector_enhancer')
-            .with_ensure('present')
-            .with_user('pe-puppet')
-            .with_minute('*/30')
-            .with_hour('*')
+          is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.service')
+        }
+
+        it {
+          is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.timer')
+        }
+
+        it {
+          is_expected.to contain_service('puppet-data-connector-enhancer.timer')
+            .with_ensure('running')
+            .with_enable(true)
         }
 
         it 'generates the correct script content' do
           is_expected.to contain_file('/usr/local/bin/puppet_data_connector_enhancer.rb')
-            .with_content(%r{puppetdb_host.*localhost})
-            .with_content(%r{puppetdb_port.*8080})
-            .with_content(%r{puppetdb_protocol.*http})
-            .with_content(%r{infra_assistant_host.*localhost})
-            .with_content(%r{infra_assistant_port.*8145})
             .with_content(%r{log_level.*INFO})
         end
       end
@@ -42,21 +43,13 @@ describe 'puppet_data_connector_enhancer' do
       context 'with custom parameters' do
         let(:params) do
           {
-            'puppetdb_host' => 'puppet.example.com',
-            'puppetdb_port' => 8081,
-            'puppetdb_protocol' => 'https',
-            'infra_assistant_host' => 'infra.example.com',
-            'infra_assistant_port' => 8146,
-            'infra_assistant_protocol' => 'http',
             'http_timeout' => 30,
             'http_retries' => 5,
             'retry_delay' => 5.0,
             'log_level' => 'DEBUG',
-            'cron_minute' => '*/15',
-            'cron_hour' => '1-23',
-            'cron_user' => 'prometheus',
+            'timer_interval' => '*:0/15',
             'script_path' => '/opt/scripts/enhancer.rb',
-            'dropzone_path' => '/custom/dropzone',
+            'dropzone' => '/custom/dropzone',
             'output_filename' => 'custom_metrics.prom'
           }
         end
@@ -72,22 +65,13 @@ describe 'puppet_data_connector_enhancer' do
         }
 
         it {
-          is_expected.to contain_cron('puppet_data_connector_enhancer')
-            .with_ensure('present')
-            .with_user('prometheus')
-            .with_minute('*/15')
-            .with_hour('1-23')
-            .with_command('/opt/scripts/enhancer.rb -q -o /custom/dropzone/custom_metrics.prom')
+          is_expected.to contain_service('puppet-data-connector-enhancer.timer')
+            .with_ensure('running')
+            .with_enable(true)
         }
 
         it 'generates the correct script content with custom parameters' do
           is_expected.to contain_file('/opt/scripts/enhancer.rb')
-            .with_content(%r{puppetdb_host.*puppet\.example\.com})
-            .with_content(%r{puppetdb_port.*8081})
-            .with_content(%r{puppetdb_protocol.*https})
-            .with_content(%r{infra_assistant_host.*infra\.example\.com})
-            .with_content(%r{infra_assistant_port.*8146})
-            .with_content(%r{infra_assistant_protocol.*http})
             .with_content(%r{http_timeout.*30})
             .with_content(%r{http_retries.*5})
             .with_content(%r{retry_delay.*5\.0})
@@ -111,15 +95,21 @@ describe 'puppet_data_connector_enhancer' do
         }
 
         it {
-          is_expected.to contain_cron('puppet_data_connector_enhancer')
+          is_expected.to contain_service('puppet-data-connector-enhancer.timer')
+            .with_ensure('stopped')
+            .with_enable(false)
+        }
+
+        it {
+          is_expected.to contain_systemd__unit_file(['puppet-data-connector-enhancer.service', 'puppet-data-connector-enhancer.timer'])
             .with_ensure('absent')
         }
       end
 
-      context 'when cron_ensure is absent' do
+      context 'when timer_ensure is absent' do
         let(:params) do
           {
-            'cron_ensure' => 'absent'
+            'timer_ensure' => 'absent'
           }
         end
 
@@ -131,23 +121,30 @@ describe 'puppet_data_connector_enhancer' do
         }
 
         it {
-          is_expected.to contain_cron('puppet_data_connector_enhancer')
+          is_expected.to contain_service('puppet-data-connector-enhancer.timer')
+            .with_ensure('stopped')
+            .with_enable(false)
+        }
+
+        it {
+          is_expected.to contain_systemd__unit_file(['puppet-data-connector-enhancer.service', 'puppet-data-connector-enhancer.timer'])
             .with_ensure('absent')
         }
       end
 
-      context 'with lookup function for dropzone_path' do
+      context 'with lookup function for dropzone' do
         let(:params) do
           {
-            'dropzone_path' => '/custom/lookup/path'
+            'dropzone' => '/custom/lookup/path'
           }
         end
 
         it { is_expected.to compile.with_all_deps }
 
         it {
-          is_expected.to contain_cron('puppet_data_connector_enhancer')
-            .with_command('/usr/local/bin/puppet_data_connector_enhancer.rb -q -o /custom/lookup/path/puppet_enhanced_metrics.prom')
+          is_expected.to contain_service('puppet-data-connector-enhancer.timer')
+            .with_ensure('running')
+            .with_enable(true)
         }
       end
 
@@ -162,15 +159,6 @@ describe 'puppet_data_connector_enhancer' do
           it { is_expected.to compile.and_raise_error(%r{parameter 'ensure' expects}) }
         end
 
-        context 'with invalid puppetdb_protocol' do
-          let(:params) do
-            {
-              'puppetdb_protocol' => 'ftp'
-            }
-          end
-
-          it { is_expected.to compile.and_raise_error(%r{parameter 'puppetdb_protocol' expects}) }
-        end
 
         context 'with invalid http_timeout' do
           let(:params) do
@@ -222,21 +210,22 @@ describe 'puppet_data_connector_enhancer' do
           it { is_expected.to compile.and_raise_error(%r{parameter 'script_path' expects}) }
         end
 
-        context 'with invalid dropzone_path (relative)' do
-          let(:params) do
-            {
-              'dropzone_path' => 'relative/path'
-            }
-          end
-
-          it { is_expected.to compile.and_raise_error(%r{parameter 'dropzone_path' expects}) }
-        end
       end
 
       context 'resource ordering' do
-        it 'ensures the script is created before the cron job' do
-          is_expected.to contain_cron('puppet_data_connector_enhancer')
+        it 'ensures the script is created before the systemd units' do
+          is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.service')
             .that_requires('File[/usr/local/bin/puppet_data_connector_enhancer.rb]')
+        end
+
+        it 'ensures the service is created before the timer' do
+          is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.timer')
+            .that_requires('Systemd::Unit_file[puppet-data-connector-enhancer.service]')
+        end
+
+        it 'ensures the timer service starts after unit files are created' do
+          is_expected.to contain_service('puppet-data-connector-enhancer.timer')
+            .that_requires('Systemd::Unit_file[puppet-data-connector-enhancer.timer]')
         end
       end
     end

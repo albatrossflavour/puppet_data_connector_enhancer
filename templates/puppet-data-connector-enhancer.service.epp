@@ -1,14 +1,13 @@
 <%- | String $script_path,
-      String $dropzone_file,
-      String $service_user | -%>
+      String $dropzone_file | -%>
 [Unit]
 Description=Puppet Data Connector Enhancer
 After=network.target
 
 [Service]
 Type=oneshot
-User=<%= $service_user %>
-Group=<%= $service_user %>
+User=pe-puppet
+Group=pe-puppet
 ExecStart=<%= $script_path %> -q -o <%= $dropzone_file %>
 StandardOutput=journal
 StandardError=journal

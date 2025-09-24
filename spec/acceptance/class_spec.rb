@@ -25,14 +25,25 @@ describe 'puppet_data_connector_enhancer class' do
 
       its(:content) do
         is_expected.to match(%r{#!/opt/puppetlabs/puppet/bin/ruby})
-        is_expected.to match(%r{puppetdb_host.*localhost})
-        is_expected.to match(%r{puppetdb_port.*8080})
         is_expected.to match(%r{log_level.*INFO})
       end
     end
 
-    describe cron do
-      it { is_expected.to have_entry('*/30 * * * * /usr/local/bin/puppet_data_connector_enhancer.rb -q -o /opt/puppetlabs/puppet-metrics-collector/puppet_enhanced_metrics.prom').with_user('pe-puppet') }
+    describe service('puppet-data-connector-enhancer.timer') do
+      it { is_expected.to be_enabled }
+      it { is_expected.to be_running }
+    end
+
+    describe file('/etc/systemd/system/puppet-data-connector-enhancer.service') do
+      it { is_expected.to exist }
+      it { is_expected.to be_file }
+      its(:content) { is_expected.to match(%r{User=pe-puppet}) }
+    end
+
+    describe file('/etc/systemd/system/puppet-data-connector-enhancer.timer') do
+      it { is_expected.to exist }
+      it { is_expected.to be_file }
+      its(:content) { is_expected.to match(%r{OnCalendar=\*:0/30}) }
     end
 
     describe 'script execution' do
@@ -49,11 +60,8 @@ describe 'puppet_data_connector_enhancer class' do
       <<-MANIFEST
         class { 'puppet_data_connector_enhancer':
           script_path        => '/opt/enhancer/script.rb',
-          puppetdb_host      => 'puppet.example.com',
-          puppetdb_protocol  => 'https',
-          cron_minute        => '*/15',
-          cron_user          => 'prometheus',
-          dropzone_path      => '/tmp/test_dropzone',
+          timer_interval     => '*:0/15',
+          dropzone           => '/tmp/test_dropzone',
           output_filename    => 'test_metrics.prom',
         }
 
@@ -77,14 +85,23 @@ describe 'puppet_data_connector_enhancer class' do
       it { is_expected.to be_executable }
 
       its(:content) do
-        is_expected.to match(%r{puppetdb_host.*puppet\.example\.com})
-        is_expected.to match(%r{puppetdb_protocol.*https})
         is_expected.to match(%r{/tmp/test_dropzone/test_metrics\.prom})
       end
     end
 
-    describe cron do
-      it { is_expected.to have_entry('*/15 * * * * /opt/enhancer/script.rb -q -o /tmp/test_dropzone/test_metrics.prom').with_user('prometheus') }
+    describe service('puppet-data-connector-enhancer.timer') do
+      it { is_expected.to be_enabled }
+      it { is_expected.to be_running }
+    end
+
+    describe file('/etc/systemd/system/puppet-data-connector-enhancer.service') do
+      its(:content) { is_expected.to match(%r{User=pe-puppet}) }
+      its(:content) { is_expected.to match(%r{/opt/enhancer/script\.rb}) }
+      its(:content) { is_expected.to match(%r{/tmp/test_dropzone/test_metrics\.prom}) }
+    end
+
+    describe file('/etc/systemd/system/puppet-data-connector-enhancer.timer') do
+      its(:content) { is_expected.to match(%r{OnCalendar=\*:0/15}) }
     end
   end
 
@@ -106,16 +123,25 @@ describe 'puppet_data_connector_enhancer class' do
       it { is_expected.not_to exist }
     end
 
-    describe cron do
-      it { is_expected.not_to have_entry('*/30 * * * * /usr/local/bin/puppet_data_connector_enhancer.rb').with_user('pe-puppet') }
+    describe service('puppet-data-connector-enhancer.timer') do
+      it { is_expected.not_to be_enabled }
+      it { is_expected.not_to be_running }
+    end
+
+    describe file('/etc/systemd/system/puppet-data-connector-enhancer.service') do
+      it { is_expected.not_to exist }
+    end
+
+    describe file('/etc/systemd/system/puppet-data-connector-enhancer.timer') do
+      it { is_expected.not_to exist }
     end
   end
 
-  context 'when disabling cron job only' do
+  context 'when disabling timer only' do
     let(:pp) do
       <<-MANIFEST
         class { 'puppet_data_connector_enhancer':
-          cron_ensure => 'absent',
+          timer_ensure => 'absent',
         }
       MANIFEST
     end
@@ -130,8 +156,17 @@ describe 'puppet_data_connector_enhancer class' do
       it { is_expected.to be_executable }
     end
 
-    describe cron do
-      it { is_expected.not_to have_entry('*/30 * * * * /usr/local/bin/puppet_data_connector_enhancer.rb').with_user('pe-puppet') }
+    describe service('puppet-data-connector-enhancer.timer') do
+      it { is_expected.not_to be_enabled }
+      it { is_expected.not_to be_running }
+    end
+
+    describe file('/etc/systemd/system/puppet-data-connector-enhancer.service') do
+      it { is_expected.not_to exist }
+    end
+
+    describe file('/etc/systemd/system/puppet-data-connector-enhancer.timer') do
+      it { is_expected.not_to exist }
     end
   end
 end

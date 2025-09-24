@@ -6,7 +6,7 @@
 
 ### Classes
 
-- [`puppet_data_connector_enhancer`](#puppet_data_connector_enhancer): Manages the Puppet Data Connector Enhancer
+* [`puppet_data_connector_enhancer`](#puppet_data_connector_enhancer): Manages the Puppet Data Connector Enhancer
 
 ## Classes
 
@@ -27,12 +27,12 @@ configuration to avoid configuration duplication.
 include puppet_data_connector_enhancer
 ```
 
-##### Custom configuration for HTTPS PuppetDB
+##### Custom timeouts and debugging
 
 ```puppet
 class { 'puppet_data_connector_enhancer':
-  puppetdb_host     => 'puppet.example.com',
-  puppetdb_protocol => 'https',
+  http_timeout => 30,
+  log_level    => 'DEBUG',
 }
 ```
 
@@ -40,7 +40,7 @@ class { 'puppet_data_connector_enhancer':
 
 ```puppet
 class { 'puppet_data_connector_enhancer':
-  cron_minute => '*/15',
+  timer_interval => '*:0/15',
 }
 ```
 
@@ -48,24 +48,16 @@ class { 'puppet_data_connector_enhancer':
 
 The following parameters are available in the `puppet_data_connector_enhancer` class:
 
-- [`ensure`](#-puppet_data_connector_enhancer--ensure)
-- [`script_path`](#-puppet_data_connector_enhancer--script_path)
-- [`puppetdb_host`](#-puppet_data_connector_enhancer--puppetdb_host)
-- [`puppetdb_port`](#-puppet_data_connector_enhancer--puppetdb_port)
-- [`puppetdb_protocol`](#-puppet_data_connector_enhancer--puppetdb_protocol)
-- [`infra_assistant_host`](#-puppet_data_connector_enhancer--infra_assistant_host)
-- [`infra_assistant_port`](#-puppet_data_connector_enhancer--infra_assistant_port)
-- [`infra_assistant_protocol`](#-puppet_data_connector_enhancer--infra_assistant_protocol)
-- [`http_timeout`](#-puppet_data_connector_enhancer--http_timeout)
-- [`http_retries`](#-puppet_data_connector_enhancer--http_retries)
-- [`retry_delay`](#-puppet_data_connector_enhancer--retry_delay)
-- [`log_level`](#-puppet_data_connector_enhancer--log_level)
-- [`cron_ensure`](#-puppet_data_connector_enhancer--cron_ensure)
-- [`cron_minute`](#-puppet_data_connector_enhancer--cron_minute)
-- [`cron_hour`](#-puppet_data_connector_enhancer--cron_hour)
-- [`cron_user`](#-puppet_data_connector_enhancer--cron_user)
-- [`dropzone_path`](#-puppet_data_connector_enhancer--dropzone_path)
-- [`output_filename`](#-puppet_data_connector_enhancer--output_filename)
+* [`ensure`](#-puppet_data_connector_enhancer--ensure)
+* [`script_path`](#-puppet_data_connector_enhancer--script_path)
+* [`http_timeout`](#-puppet_data_connector_enhancer--http_timeout)
+* [`http_retries`](#-puppet_data_connector_enhancer--http_retries)
+* [`retry_delay`](#-puppet_data_connector_enhancer--retry_delay)
+* [`log_level`](#-puppet_data_connector_enhancer--log_level)
+* [`timer_ensure`](#-puppet_data_connector_enhancer--timer_ensure)
+* [`timer_interval`](#-puppet_data_connector_enhancer--timer_interval)
+* [`dropzone`](#-puppet_data_connector_enhancer--dropzone)
+* [`output_filename`](#-puppet_data_connector_enhancer--output_filename)
 
 ##### <a name="-puppet_data_connector_enhancer--ensure"></a>`ensure`
 
@@ -82,54 +74,6 @@ Data type: `Stdlib::Absolutepath`
 The full path where the Ruby script will be installed.
 
 Default value: `'/usr/local/bin/puppet_data_connector_enhancer.rb'`
-
-##### <a name="-puppet_data_connector_enhancer--puppetdb_host"></a>`puppetdb_host`
-
-Data type: `Stdlib::Host`
-
-The hostname of the PuppetDB server to query.
-
-Default value: `'localhost'`
-
-##### <a name="-puppet_data_connector_enhancer--puppetdb_port"></a>`puppetdb_port`
-
-Data type: `Stdlib::Port`
-
-The port number for PuppetDB connections.
-
-Default value: `8080`
-
-##### <a name="-puppet_data_connector_enhancer--puppetdb_protocol"></a>`puppetdb_protocol`
-
-Data type: `Enum['http', 'https']`
-
-The protocol to use for PuppetDB connections (http or https).
-
-Default value: `'http'`
-
-##### <a name="-puppet_data_connector_enhancer--infra_assistant_host"></a>`infra_assistant_host`
-
-Data type: `Stdlib::Host`
-
-The hostname of the Infrastructure Assistant server.
-
-Default value: `'localhost'`
-
-##### <a name="-puppet_data_connector_enhancer--infra_assistant_port"></a>`infra_assistant_port`
-
-Data type: `Stdlib::Port`
-
-The port number for Infrastructure Assistant connections.
-
-Default value: `8145`
-
-##### <a name="-puppet_data_connector_enhancer--infra_assistant_protocol"></a>`infra_assistant_protocol`
-
-Data type: `Enum['http', 'https']`
-
-The protocol to use for Infrastructure Assistant connections.
-
-Default value: `'https'`
 
 ##### <a name="-puppet_data_connector_enhancer--http_timeout"></a>`http_timeout`
 
@@ -163,45 +107,29 @@ The logging level for the script (DEBUG, INFO, WARN, ERROR).
 
 Default value: `'INFO'`
 
-##### <a name="-puppet_data_connector_enhancer--cron_ensure"></a>`cron_ensure`
+##### <a name="-puppet_data_connector_enhancer--timer_ensure"></a>`timer_ensure`
 
 Data type: `Enum['present', 'absent']`
 
-Whether the cron job should be present or absent.
+Whether the systemd timer should be present or absent.
 
 Default value: `'present'`
 
-##### <a name="-puppet_data_connector_enhancer--cron_minute"></a>`cron_minute`
-
-Data type: `Variant[String[1], Integer]`
-
-The minute specification for the cron job.
-
-Default value: `'*/30'`
-
-##### <a name="-puppet_data_connector_enhancer--cron_hour"></a>`cron_hour`
-
-Data type: `Variant[String[1], Integer]`
-
-The hour specification for the cron job.
-
-Default value: `'*'`
-
-##### <a name="-puppet_data_connector_enhancer--cron_user"></a>`cron_user`
+##### <a name="-puppet_data_connector_enhancer--timer_interval"></a>`timer_interval`
 
 Data type: `String[1]`
 
-The user under which the cron job should run.
+The systemd timer interval specification (e.g., '*:0/30' for every 30 minutes).
 
-Default value: `'pe-puppet'`
+Default value: `'*:0/30'`
 
-##### <a name="-puppet_data_connector_enhancer--dropzone_path"></a>`dropzone_path`
+##### <a name="-puppet_data_connector_enhancer--dropzone"></a>`dropzone`
 
 Data type: `Stdlib::Absolutepath`
 
 The path to the dropzone directory. Defaults to the puppet_data_connector configuration.
 
-Default value: `lookup('puppet_data_connector::dropzone_path', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet-metrics-collector')`
+Default value: `lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet/prometheus_dropzone')`
 
 ##### <a name="-puppet_data_connector_enhancer--output_filename"></a>`output_filename`
 
@@ -210,3 +138,4 @@ Data type: `String[1]`
 The filename for the metrics output (will be placed in the dropzone).
 
 Default value: `'puppet_enhanced_metrics.prom'`
+

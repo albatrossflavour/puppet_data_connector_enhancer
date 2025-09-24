@@ -10,6 +10,10 @@
   "description": "This module extends the functionality of the premium puppet_data_connector module by deploying and managing a Ruby script that collects comprehensive Puppet infrastructure metrics and pushes them to the data connector dropzone. It gathers metrics from PuppetDB and Infrastructure Assistant APIs including node management, patch status, security compliance, and AI token usage.",
   "dependencies": [
     {
+      "name": "puppetlabs/puppet_data_connector",
+      "version_requirement": ">= 1.0.0 < 2.0.0"
+    },
+    {
       "name": "puppetlabs/stdlib",
       "version_requirement": ">= 9.0.0 < 10.0.0"
     },

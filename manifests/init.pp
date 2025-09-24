@@ -13,24 +13,6 @@
 # @param script_path
 #   The full path where the Ruby script will be installed.
 #
-# @param puppetdb_host
-#   The hostname of the PuppetDB server to query.
-#
-# @param puppetdb_port
-#   The port number for PuppetDB connections.
-#
-# @param puppetdb_protocol
-#   The protocol to use for PuppetDB connections (http or https).
-#
-# @param infra_assistant_host
-#   The hostname of the Infrastructure Assistant server.
-#
-# @param infra_assistant_port
-#   The port number for Infrastructure Assistant connections.
-#
-# @param infra_assistant_protocol
-#   The protocol to use for Infrastructure Assistant connections.
-#
 # @param http_timeout
 #   HTTP request timeout in seconds.
 #
@@ -49,9 +31,6 @@
 # @param timer_interval
 #   The systemd timer interval specification (e.g., '*:0/30' for every 30 minutes).
 #
-# @param service_user
-#   The user under which the service should run.
-#
 # @param dropzone
 #   The path to the dropzone directory. Defaults to the puppet_data_connector configuration.
 #
@@ -61,10 +40,10 @@
 # @example Basic usage with default parameters
 #   include puppet_data_connector_enhancer
 #
-# @example Custom configuration for HTTPS PuppetDB
+# @example Custom timeouts and debugging
 #   class { 'puppet_data_connector_enhancer':
-#     puppetdb_host     => 'puppet.example.com',
-#     puppetdb_protocol => 'https',
+#     http_timeout => 30,
+#     log_level    => 'DEBUG',
 #   }
 #
 # @example Run every 15 minutes instead of default 30
@@ -75,19 +54,12 @@
 class puppet_data_connector_enhancer (
   Enum['present', 'absent'] $ensure                     = 'present',
   Stdlib::Absolutepath $script_path                     = '/usr/local/bin/puppet_data_connector_enhancer.rb',
-  Stdlib::Host $puppetdb_host                           = 'localhost',
-  Stdlib::Port $puppetdb_port                           = 8080,
-  Enum['http', 'https'] $puppetdb_protocol              = 'http',
-  Stdlib::Host $infra_assistant_host                    = 'localhost',
-  Stdlib::Port $infra_assistant_port                    = 8145,
-  Enum['http', 'https'] $infra_assistant_protocol       = 'https',
   Integer[1, 300] $http_timeout                         = 5,
   Integer[1, 10] $http_retries                          = 3,
   Numeric $retry_delay                                  = 2.0,
   Enum['DEBUG', 'INFO', 'WARN', 'ERROR'] $log_level     = 'INFO',
   Enum['present', 'absent'] $timer_ensure               = 'present',
   String[1] $timer_interval                             = '*:0/30',
-  String[1] $service_user                               = 'pe-puppet',
   Stdlib::Absolutepath $dropzone                        = lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet/prometheus_dropzone'),
   String[1] $output_filename                            = 'puppet_enhanced_metrics.prom',
 ) {
@@ -98,17 +70,11 @@ class puppet_data_connector_enhancer (
   file { $script_path:
     ensure  => $ensure,
     content => epp('puppet_data_connector_enhancer/puppet_data_connector_enhancer.rb.epp', {
-      'puppetdb_host'               => $puppetdb_host,
-      'puppetdb_port'               => $puppetdb_port,
-      'puppetdb_protocol'           => $puppetdb_protocol,
-      'infra_assistant_host'        => $infra_assistant_host,
-      'infra_assistant_port'        => $infra_assistant_port,
-      'infra_assistant_protocol'    => $infra_assistant_protocol,
-      'http_timeout'                => $http_timeout,
-      'http_retries'                => $http_retries,
-      'retry_delay'                 => $retry_delay,
-      'log_level'                   => $log_level,
-      'dropzone_file'               => $dropzone_file,
+      'http_timeout'  => $http_timeout,
+      'http_retries'  => $http_retries,
+      'retry_delay'   => $retry_delay,
+      'log_level'     => $log_level,
+      'dropzone_file' => $dropzone_file,
     }),
     mode    => '0755',
     owner   => 'root',
@@ -120,9 +86,8 @@ class puppet_data_connector_enhancer (
   if $ensure == 'present' and $timer_ensure == 'present' {
     systemd::unit_file { 'puppet-data-connector-enhancer.service':
       content => epp('puppet_data_connector_enhancer/puppet-data-connector-enhancer.service.epp', {
-        'script_path' => $script_path,
+        'script_path'   => $script_path,
         'dropzone_file' => $dropzone_file,
-        'service_user' => $service_user,
       }),
       require => File[$script_path],
     }

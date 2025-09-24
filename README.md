@@ -68,7 +68,7 @@ The module does **not** affect:
 This module depends on:
 
 - `puppetlabs/stdlib` (>= 9.0.0 < 10.0.0)
-- `puppetlabs/cron_core` (>= 1.0.0 < 2.0.0)
+- `puppet/systemd` (>= 4.0.0 < 8.0.0)
 
 ### Beginning with puppet_data_connector_enhancer
 
@@ -81,7 +81,7 @@ include puppet_data_connector_enhancer
 This will:
 
 1. Install the metrics collection script to `/usr/local/bin/puppet_data_connector_enhancer.rb`
-2. Create a cron job running every 30 minutes as the `pe-puppet` user
+2. Create a systemd timer running every 30 minutes as the `pe-puppet` user
 3. Automatically discover the dropzone path from your `puppet_data_connector` configuration
 4. Connect to PuppetDB on `localhost:8080` using HTTP
 
@@ -95,13 +95,12 @@ This will:
 include puppet_data_connector_enhancer
 ```
 
-**Custom PuppetDB connection** (for distributed Puppet architectures):
+**Custom timeouts and debugging**:
 
 ```puppet
 class { 'puppet_data_connector_enhancer':
-  puppetdb_host     => 'puppetdb.example.com',
-  puppetdb_protocol => 'https',
-  puppetdb_port     => 8081,
+  http_timeout => 30,
+  log_level    => 'DEBUG',
 }
 ```
 
@@ -109,25 +108,20 @@ class { 'puppet_data_connector_enhancer':
 
 ```puppet
 class { 'puppet_data_connector_enhancer':
-  cron_minute => '*/15',  # Every 15 minutes
+  timer_interval => '*:0/15',  # Every 15 minutes
 }
 ```
 
 ### Advanced configuration
 
-**HTTPS PuppetDB with custom timeouts**:
+**Custom timeouts and retry behavior**:
 
 ```puppet
 class { 'puppet_data_connector_enhancer':
-  puppetdb_host               => 'puppet.company.com',
-  puppetdb_protocol           => 'https',
-  puppetdb_port               => 8081,
-  infra_assistant_host        => 'infra.company.com',
-  infra_assistant_protocol    => 'https',
-  http_timeout                => 30,
-  http_retries                => 5,
-  retry_delay                 => 3.0,
-  log_level                   => 'DEBUG',
+  http_timeout    => 30,
+  http_retries    => 5,
+  retry_delay     => 3.0,
+  log_level       => 'DEBUG',
 }
 ```
 
@@ -136,11 +130,9 @@ class { 'puppet_data_connector_enhancer':
 ```puppet
 class { 'puppet_data_connector_enhancer':
   script_path      => '/opt/puppet/scripts/enhancer.rb',
-  dropzone_path    => '/opt/custom/dropzone',
+  dropzone         => '/opt/custom/dropzone',
   output_filename  => 'enhanced_puppet_metrics.prom',
-  cron_minute      => '5,35',  # Run at 5 and 35 minutes past the hour
-  cron_hour        => '1-23',  # Skip midnight hour
-  cron_user        => 'prometheus',
+  timer_interval   => '01,31:00',  # Run at 1 and 31 minutes past each hour
 }
 ```
 
@@ -148,7 +140,7 @@ class { 'puppet_data_connector_enhancer':
 
 ```puppet
 class { 'puppet_data_connector_enhancer':
-  cron_ensure => 'absent',
+  timer_ensure => 'absent',
 }
 ```
 
@@ -159,13 +151,13 @@ This module is designed to work seamlessly with the premium `puppet_data_connect
 ```puppet
 # Configure the base data connector
 class { 'puppet_data_connector':
-  dropzone_path => '/opt/puppetlabs/prometheus',
+  dropzone => '/opt/puppetlabs/prometheus',
   # ... other puppet_data_connector parameters
 }
 
 # Add enhanced metrics collection
 class { 'puppet_data_connector_enhancer':
-  # dropzone_path automatically discovered from puppet_data_connector
+  # dropzone automatically discovered from puppet_data_connector
   puppetdb_host => $facts['puppet_server'],
 }
 ```
@@ -173,7 +165,7 @@ class { 'puppet_data_connector_enhancer':
 The enhancer automatically discovers the dropzone path using:
 
 ```puppet
-lookup('puppet_data_connector::dropzone_path', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet-metrics-collector')
+lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet/prometheus_dropzone')
 ```
 
 ## Reference
@@ -191,8 +183,9 @@ puppet strings generate --format markdown
 | `ensure`            | Enum['present', 'absent']              | `'present'`                         | Whether the enhancer should be installed |
 | `puppetdb_host`     | Stdlib::Host                           | `'localhost'`                       | PuppetDB hostname                        |
 | `puppetdb_protocol` | Enum['http', 'https']                  | `'http'`                            | PuppetDB connection protocol             |
-| `dropzone_path`     | Stdlib::Absolutepath                   | Lookup from `puppet_data_connector` | Directory for metrics files              |
-| `cron_minute`       | Variant[String, Integer]               | `'*/30'`                            | Cron minute specification                |
+| `dropzone`          | Stdlib::Absolutepath                   | Lookup from `puppet_data_connector` | Directory for metrics files              |
+| `timer_interval`    | String                                 | `'*:0/30'`                          | Systemd timer interval specification     |
+| `service_user`      | String                                 | `'pe-puppet'`                       | User for systemd service                 |
 | `log_level`         | Enum['DEBUG', 'INFO', 'WARN', 'ERROR'] | `'INFO'`                            | Logging verbosity                        |
 
 ### Supported metrics
@@ -228,7 +221,7 @@ This module supports the same operating systems as Puppet Enterprise:
 
 - **Puppet Enterprise dependency**: Requires PE-compatible Ruby environment
 - **Network access**: Requires connectivity to PuppetDB and optionally Infrastructure Assistant
-- **Privilege requirements**: Cron job runs as `pe-puppet` user by default
+- **Privilege requirements**: Systemd service runs as `pe-puppet` user by default
 - **SSL verification**: Disabled by default for self-signed certificates (common in PE)
 
 ### Version compatibility
@@ -293,7 +286,7 @@ For enterprise support, training, and consulting services, please contact the mo
 1. **Permission denied errors**: Ensure the `pe-puppet` user has access to the dropzone directory
 2. **Connection refused**: Verify PuppetDB connectivity and firewall settings
 3. **SSL certificate errors**: Expected with self-signed certificates; verification is disabled by default
-4. **Missing metrics**: Check cron job logs and script output with `--verbose` flag
+4. **Missing metrics**: Check systemd service logs and script output with `--verbose` flag
 
 **Debug mode:**
 
@@ -301,8 +294,9 @@ For enterprise support, training, and consulting services, please contact the mo
 # Run manually with debug logging
 /usr/local/bin/puppet_data_connector_enhancer.rb --verbose --output /tmp/debug_metrics.prom
 
-# Check cron job logs
-grep "puppet_data_connector_enhancer" /var/log/cron
+# Check systemd service logs
+journalctl -u puppet-data-connector-enhancer.service
+journalctl -u puppet-data-connector-enhancer.timer
 ```
 
 ---
