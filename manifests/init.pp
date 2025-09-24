@@ -52,7 +52,7 @@
 # @param service_user
 #   The user under which the service should run.
 #
-# @param dropzone_path
+# @param dropzone
 #   The path to the dropzone directory. Defaults to the puppet_data_connector configuration.
 #
 # @param output_filename
@@ -88,11 +88,11 @@ class puppet_data_connector_enhancer (
   Enum['present', 'absent'] $timer_ensure               = 'present',
   String[1] $timer_interval                             = '*:0/30',
   String[1] $service_user                               = 'pe-puppet',
-  Stdlib::Absolutepath $dropzone_path                   = lookup('puppet_data_connector::dropzone_path', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet-metrics-collector'),
+  Stdlib::Absolutepath $dropzone                        = lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', ''/opt/puppetlabs/puppet/prometheus_dropzone'),
   String[1] $output_filename                            = 'puppet_enhanced_metrics.prom',
 ) {
 
-  $dropzone_file = "${dropzone_path}/${output_filename}"
+  $dropzone_file = "${dropzone}/${output_filename}"
 
   # Install the Ruby script
   file { $script_path:
