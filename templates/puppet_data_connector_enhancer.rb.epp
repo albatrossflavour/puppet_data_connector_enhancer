@@ -1,0 +1,849 @@
+#!/opt/puppetlabs/puppet/bin/ruby
+<%- |
+  String $puppetdb_host,
+  Integer $puppetdb_port,
+  String $puppetdb_protocol,
+  String $infra_assistant_host,
+  Integer $infra_assistant_port,
+  String $infra_assistant_protocol,
+  Integer $http_timeout,
+  Integer $http_retries,
+  Numeric $retry_delay,
+  String $log_level,
+  String $dropzone_file,
+| -%>
+
+require 'json'
+require 'net/http'
+require 'uri'
+require 'logger'
+require 'time'
+require 'optparse'
+require 'fileutils'
+require 'set'
+
+# Custom exceptions for better error handling
+class MetricsCollectionError < StandardError
+  attr_reader :api_endpoint, :response_code
+
+  def initialize(message, api_endpoint = nil, response_code = nil)
+    super(message)
+    @api_endpoint = api_endpoint
+    @response_code = response_code
+  end
+end
+
+class PrometheusMetricsGenerator
+  def initialize
+    # Log to STDERR if we're writing metrics to a file, otherwise STDOUT
+    log_output = ENV['OUTPUT_FILE'] ? STDERR : STDOUT
+    @logger = Logger.new(log_output)
+    @logger.level = ENV['LOG_LEVEL']&.upcase&.to_sym || Logger::<%= $log_level %>
+    @data = []
+    @seen_metrics = Set.new  # Track unique metrics to prevent duplicates
+    @config = load_configuration
+    @collection_errors = []
+    @start_time = Time.now.to_f
+  end
+
+  def generate_metrics
+    @logger.info("Starting Puppet metrics collection...")
+
+    # Collect each metric type with error handling
+    collect_with_error_handling('configuration_versions') { collect_configuration_versions }
+    collect_with_error_handling('node_counts') { collect_node_counts }
+    collect_with_error_handling('state_overview') { collect_state_overview }
+    collect_with_error_handling('os_info') { collect_os_info }
+    collect_with_error_handling('infra_assistant_tokens') { collect_infra_assistant_tokens }
+    collect_with_error_handling('trusted_facts') { collect_trusted_facts }
+    collect_with_error_handling('patching_info') { collect_patching_info }
+
+    output_metrics
+  end
+
+  private
+
+  # Load configuration from environment variables with sensible defaults
+  def load_configuration
+    {
+      puppetdb_host: ENV['PUPPETDB_HOST'] || '<%= $puppetdb_host %>',
+      puppetdb_port: ENV['PUPPETDB_PORT'] || '<%= $puppetdb_port %>',
+      puppetdb_protocol: ENV['PUPPETDB_PROTOCOL'] || '<%= $puppetdb_protocol %>',
+      infra_assistant_host: ENV['INFRA_ASSISTANT_HOST'] || '<%= $infra_assistant_host %>',
+      infra_assistant_port: ENV['INFRA_ASSISTANT_PORT'] || '<%= $infra_assistant_port %>',
+      infra_assistant_protocol: ENV['INFRA_ASSISTANT_PROTOCOL'] || '<%= $infra_assistant_protocol %>',
+      http_timeout: ENV['HTTP_TIMEOUT']&.to_i || <%= $http_timeout %>,
+      http_retries: ENV['HTTP_RETRIES']&.to_i || <%= $http_retries %>,
+      retry_delay: ENV['RETRY_DELAY']&.to_f || <%= $retry_delay %>,
+      output_file: ENV['OUTPUT_FILE'] || '<%= $dropzone_file %>',
+      manage_ownership: ENV['MANAGE_OWNERSHIP'] != 'false',  # Default true, set to 'false' to disable
+      file_owner: ENV['FILE_OWNER'] || 'pe-puppet',
+      file_group: ENV['FILE_GROUP'] || 'pe-puppet',
+      file_mode: ENV['FILE_MODE']&.to_i(8) || 0o640
+    }
+  end
+
+  # Configuration helper methods
+  def puppetdb_base_url
+    "#{@config[:puppetdb_protocol]}://#{@config[:puppetdb_host]}:#{@config[:puppetdb_port]}"
+  end
+
+  def infra_assistant_base_url
+    "#{@config[:infra_assistant_protocol]}://#{@config[:infra_assistant_host]}:#{@config[:infra_assistant_port]}"
+  end
+
+  # Metric formatting and sanitization methods
+  def sanitize_label_value(value)
+    return '' if value.nil?
+    # Convert to string and escape quotes, backslashes, and newlines
+    value.to_s.gsub(/["\\]/, '\\\\\\&').gsub(/\n/, '\\n').gsub(/\r/, '\\r')
+  end
+
+  def build_metric(name, labels = {}, value = 1)
+    # Skip empty or nil metric names/values
+    return nil if name.nil? || name.empty? || value.nil?
+
+    if labels.empty?
+      "#{name} #{value}"
+    else
+      # Filter out nil/empty label values
+      filtered_labels = labels.reject { |k, v| k.nil? || v.nil? || (v.respond_to?(:empty?) && v.empty?) }
+
+      if filtered_labels.empty?
+        "#{name} #{value}"
+      else
+        sanitized_labels = filtered_labels.map { |k, v| "#{k}=\"#{sanitize_label_value(v)}\"" }.join(', ')
+        "#{name}{#{sanitized_labels}} #{value}"
+      end
+    end
+  end
+
+  # Add metric with deduplication
+  def add_metric(name, labels = {}, value = 1)
+    metric_line = build_metric(name, labels, value)
+    return unless metric_line
+
+    # Create a unique key for this metric (name + sorted labels, excluding value)
+    if labels.empty?
+      metric_key = name
+    else
+      sorted_labels = labels.sort.map { |k, v| "#{k}=#{v}" }.join(',')
+      metric_key = "#{name}{#{sorted_labels}}"
+    end
+
+    if @seen_metrics.include?(metric_key)
+      @logger.warn("Duplicate metric detected: #{metric_key}")
+      return
+    end
+
+    @seen_metrics.add(metric_key)
+    @data << metric_line
+  end
+
+  private
+
+
+  # HTTP client methods with retry logic and proper error handling
+  def fetch_json_from_puppetdb(uri_str, params = {})
+    uri = URI(uri_str)
+    uri.query = URI.encode_www_form(params) unless params.empty?
+
+    retries = @config[:http_retries] || 3
+    retry_delay = @config[:retry_delay] || 2
+
+    begin
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.open_timeout = @config[:http_timeout]
+      http.read_timeout = @config[:http_timeout]
+
+      if uri.scheme == 'https'
+        http.use_ssl = true
+        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+      end
+
+      request = Net::HTTP::Get.new(uri.request_uri)
+      request['User-Agent'] = 'puppet-data-connector-enhancer/1.0'
+
+      @logger.debug("Making request to: #{uri}")
+      response = http.request(request)
+
+      if response.is_a?(Net::HTTPSuccess)
+        begin
+          parsed_data = JSON.parse(response.body)
+          @logger.debug("Successfully parsed #{parsed_data.length} items from #{uri.path}")
+          return parsed_data
+        rescue JSON::ParserError => e
+          error_msg = "Invalid JSON response from #{uri}: #{e.message}"
+          @logger.error(error_msg)
+          record_collection_error(error_msg, uri.to_s, response.code)
+          raise MetricsCollectionError.new(error_msg, uri.to_s, response.code)
+        end
+      else
+        error_msg = "HTTP #{response.code}: #{response.message}"
+        @logger.error("Request failed: #{error_msg} for #{uri}")
+        @logger.debug("Response body: #{response.body[0..500]}") if response.body
+        record_collection_error(error_msg, uri.to_s, response.code)
+        raise MetricsCollectionError.new(error_msg, uri.to_s, response.code)
+      end
+
+    rescue Net::TimeoutError => e
+      error_msg = "Timeout connecting to #{uri.host}:#{uri.port}"
+      @logger.error(error_msg)
+      record_collection_error(error_msg, uri.to_s)
+      raise MetricsCollectionError.new(error_msg, uri.to_s)
+
+    rescue Net::OpenTimeout, Net::ReadTimeout => e
+      error_msg = "Timeout during request to #{uri}: #{e.message}"
+      @logger.error(error_msg)
+      record_collection_error(error_msg, uri.to_s)
+      raise MetricsCollectionError.new(error_msg, uri.to_s)
+
+    rescue Errno::ECONNREFUSED => e
+      error_msg = "Connection refused to #{uri.host}:#{uri.port}"
+      @logger.error(error_msg)
+      record_collection_error(error_msg, uri.to_s)
+      raise MetricsCollectionError.new(error_msg, uri.to_s)
+
+    rescue StandardError => e
+      error_msg = "Unexpected error: #{e.class.name}: #{e.message}"
+      @logger.error("#{error_msg} for #{uri}")
+      record_collection_error(error_msg, uri.to_s)
+      raise MetricsCollectionError.new(error_msg, uri.to_s)
+    end
+
+  rescue MetricsCollectionError => e
+    retries -= 1
+    if retries > 0
+      @logger.warn("Request failed, retrying in #{retry_delay}s (#{retries} attempts left): #{e.message}")
+      sleep(retry_delay)
+      retry_delay *= 1.5  # Exponential backoff
+      retry
+    else
+      @logger.error("Request failed after all retries: #{e.message}")
+      raise e
+    end
+  end
+
+  # Track collection errors for observability
+  def record_collection_error(message, endpoint, response_code = nil)
+    @collection_errors << {
+      timestamp: Time.now.to_i,
+      message: message,
+      endpoint: endpoint,
+      response_code: response_code
+    }
+  end
+
+  # Safe data collection wrapper
+  def collect_with_error_handling(collection_name, &block)
+    @logger.info("Collecting #{collection_name} metrics...")
+    start_time = Time.now.to_f
+
+    begin
+      result = yield
+      duration = Time.now.to_f - start_time
+      @logger.info("Successfully collected #{collection_name} metrics in #{duration.round(2)}s")
+      result
+    rescue MetricsCollectionError => e
+      duration = Time.now.to_f - start_time
+      @logger.error("Failed to collect #{collection_name} metrics after #{duration.round(2)}s: #{e.message}")
+
+      # Add an error metric to indicate partial failure
+      @data << build_metric('puppet_exporter_collection_failed', {
+        collection: collection_name,
+        endpoint: e.api_endpoint || 'unknown',
+        error: e.message[0..100] # Truncate long error messages
+      })
+
+      # Continue with other collections
+      nil
+    rescue StandardError => e
+      duration = Time.now.to_f - start_time
+      @logger.error("Unexpected error collecting #{collection_name} after #{duration.round(2)}s: #{e.class.name}: #{e.message}")
+
+      # Add an error metric for unexpected failures
+      @data << build_metric('puppet_exporter_collection_failed', {
+        collection: collection_name,
+        endpoint: 'unknown',
+        error: "#{e.class.name}: #{e.message}"[0..100]
+      })
+
+      nil
+    end
+  end
+
+  # Data collection methods
+  def collect_configuration_versions
+    uri = "#{puppetdb_base_url}/pdb/query/v4/reports"
+    params = { 'query' => '["extract", ["certname", "environment", "configuration_version"], ["=", "latest_report?", true]]' }
+    config_versions = fetch_json_from_puppetdb(uri, params)
+
+    return unless config_versions && config_versions.is_a?(Array)
+
+    config_versions.each do |entry|
+      next unless entry && entry['certname'] && entry['environment']
+
+      @data << build_metric('puppet_configuration_version', {
+        environment: entry['environment'],
+        node: entry['certname'],
+        version: entry['configuration_version']
+      })
+    end
+
+    @logger.debug("Collected configuration versions for #{config_versions.length} nodes")
+  end
+
+  def collect_node_counts
+    uri = "#{puppetdb_base_url}/pdb/query/v4"
+    params = { 'query' => 'nodes { }' }
+    nodecount = fetch_json_from_puppetdb(uri, params)
+
+    return unless nodecount && nodecount.is_a?(Array)
+
+    environments = Hash.new(0)
+    nodecount.each { |entry| environments[entry['catalog_environment']] += 1 if entry && entry['catalog_environment'] }
+
+    environments.each do |env, count|
+      @data << build_metric('puppet_node_count', { environment: env }, count)
+    end
+    @data << build_metric('puppet_node_count', { environment: 'all' }, environments.values.sum)
+
+    @logger.debug("Collected node counts for #{environments.length} environments (#{nodecount.length} total nodes)")
+  end
+
+  def collect_state_overview
+    uri = "#{puppetdb_base_url}/pdb/ext/v1/state-overview"
+    params = {}
+    stateoverview = fetch_json_from_puppetdb(uri, params) || []
+
+    stateoverview.each do |entry, value|
+      @data << build_metric('puppet_state_overview', { state: entry }, value)
+    end
+  end
+
+  def collect_os_info
+    @operatingsystems = Hash.new(0)
+    uri = "#{puppetdb_base_url}/pdb/query/v4/facts/os"
+    params = {}
+    os_info = fetch_json_from_puppetdb(uri, params) || []
+
+    os_info.each do |entry|
+      next unless entry && entry['value']
+      certname = entry['certname']
+      environment = entry['environment']
+      family = entry.dig('value', 'family')
+      name = entry.dig('value', 'name')
+      version = entry.dig('value', 'release', 'full')
+      architecture = entry.dig('value', 'architecture')
+      hardware = entry.dig('value', 'hardware')
+
+      @data << build_metric('puppet_node_os', {
+        node: certname,
+        environment: environment,
+        family: family,
+        name: name,
+        version: version,
+        architecture: architecture,
+        hardware: hardware
+      })
+      @operatingsystems[name] += 1
+    end
+  end
+
+
+  def collect_infra_assistant_tokens
+    uri = "#{infra_assistant_base_url}/status/v1/services"
+    params = { 'level' => 'debug' }
+    tokens = fetch_json_from_puppetdb(uri, params) || []
+
+    input_section = tokens.dig('pe-infra-assistant', 'status', 'ai-service', 'token-usage', 'input')
+    if input_section
+      input_total = input_section['count'].to_f * input_section['mean'].to_f
+      @data << build_metric('puppet_infra_assistant_tokens_total', { type: 'input' }, input_total.round)
+    else
+      @data << build_metric('puppet_infra_assistant_tokens_total', { type: 'input' }, 0)
+    end
+
+    output_section = tokens.dig('pe-infra-assistant', 'status', 'ai-service', 'token-usage', 'output')
+    if output_section
+      output_total = output_section['count'].to_f * output_section['mean'].to_f
+      @data << build_metric('puppet_infra_assistant_tokens_total', { type: 'output' }, output_total.round)
+    else
+      @data << build_metric('puppet_infra_assistant_tokens_total', { type: 'output' }, 0)
+    end
+
+    reasoning_section = tokens.dig('pe-infra-assistant', 'status', 'ai-service', 'token-usage', 'reasoning')
+    if reasoning_section
+      reasoning_total = reasoning_section['count'].to_f * reasoning_section['mean'].to_f
+      @data << build_metric('puppet_infra_assistant_tokens_total', { type: 'reasoning' }, reasoning_total.round)
+    else
+      @data << build_metric('puppet_infra_assistant_tokens_total', { type: 'reasoning' }, 0)
+    end
+  end
+
+  def collect_trusted_facts
+    uri = "#{puppetdb_base_url}/pdb/query/v4/facts/trusted"
+    params = {}
+    trusted = fetch_json_from_puppetdb(uri, params) || []
+
+    trusted.each do |entry|
+      next unless entry && entry['value']
+      certname = entry['certname']
+      environment = entry['environment']
+      role = entry.dig('value', 'extensions', 'pp_role')
+      datacenter = entry.dig('value', 'extensions', 'pp_datacenter')
+
+      @data << build_metric('puppet_node_trusted', {
+        node: certname,
+        environment: environment,
+        role: role,
+        datacenter: datacenter
+      })
+    end
+  end
+
+
+  def collect_patching_info
+    @patch_count = 0
+    @security_patch_count = 0
+    @block_count = 0
+    @patch_groups = Hash.new(0)
+
+    uri = "#{puppetdb_base_url}/pdb/query/v4/facts/pe_patch"
+    params = {}
+    patch_info = fetch_json_from_puppetdb(uri, params)
+
+    return unless patch_info && patch_info.is_a?(Array)
+
+    patch_info.each do |entry|
+      next unless entry && entry['value']
+      certname = entry['certname']
+      environment = entry['environment']
+      update_count = entry.dig('value', 'package_update_count') || 0
+      sec_update_count = entry.dig('value', 'security_package_update_count') || 0
+      patch_group = entry.dig('value', 'patch_group')
+
+      package_updates = entry.dig('value', 'package_updates')
+      if package_updates && package_updates != {}
+        package_updates.each do |package|
+          add_metric('puppet_patching_detail', {
+            node: certname,
+            environment: environment,
+            patch_group: patch_group,
+            type: 'all',
+            package: package
+          })
+        end
+      end
+      security_updates = entry.dig('value', 'security_package_updates')
+      if security_updates && security_updates != {}
+        security_updates.each do |package|
+          add_metric('puppet_patching_detail', {
+            node: certname,
+            environment: environment,
+            patch_group: patch_group,
+            type: 'security',
+            package: package
+          })
+        end
+      end
+      last_run = entry.dig('value', 'last_run')
+      if last_run && last_run != {}
+        patch_time = Time.parse(last_run['date']).to_i
+        state = last_run['return_code'] == 'Success' ? 0 : 1
+        @data << build_metric('puppet_patch_run', {
+          node: certname,
+          environment: environment,
+          patch_group: patch_group,
+          return_code: state.to_s
+        }, patch_time)
+      else
+        @data << build_metric('puppet_patch_run', {
+          node: certname,
+          environment: environment,
+          patch_group: patch_group,
+          return_code: 'unknown'
+        }, 0)
+      end
+
+      reboot = entry.dig('value', 'reboots', 'reboot_required') ? 1 : 0
+      restart = entry.dig('value', 'reboots', 'app_restart_required') ? 1 : 0
+      blocked_status = entry.dig('value', 'blocked') ? 1 : 0
+
+      @data << build_metric('puppet_restart_required', {
+        node: certname,
+        environment: environment,
+        type: 'reboot'
+      }, reboot)
+      @data << build_metric('puppet_restart_required', {
+        node: certname,
+        environment: environment,
+        type: 'app'
+      }, restart)
+      @data << build_metric('puppet_patching_data', {
+        node: certname,
+        environment: environment,
+        patch_group: patch_group,
+        type: 'all'
+      }, update_count)
+      @data << build_metric('puppet_patching_data', {
+        node: certname,
+        environment: environment,
+        patch_group: patch_group,
+        type: 'security'
+      }, sec_update_count)
+      @data << build_metric('puppet_patching_blocked', {
+        node: certname,
+        environment: environment,
+        patch_group: patch_group
+      }, blocked_status)
+      @data << build_metric('puppet_patching_group', {
+        node: certname,
+        environment: environment,
+        patch_group: patch_group
+      })
+
+      @patch_count += 1 if update_count > 0
+      @security_patch_count += 1 if sec_update_count > 0
+      @block_count += 1 if blocked_status > 0
+      @patch_groups[patch_group] += 1
+    end
+  end
+
+  def output_metrics
+    # Add summary statistics
+    @data << build_metric('puppet_patching_stats', { type: 'nodes_to_patch' }, @patch_count)
+    @data << build_metric('puppet_patching_stats', { type: 'nodes_to_security_patch' }, @security_patch_count)
+    @data << build_metric('puppet_patching_stats', { type: 'blocked' }, @block_count)
+
+    @operatingsystems&.each do |os_name, count|
+      @data << build_metric('puppet_node_os_count', { operatingsystem: os_name }, count)
+    end
+
+    @patch_groups&.each do |group, count|
+      @data << build_metric('puppet_patching_groups', { patch_group: group }, count) unless group.nil?
+    end
+
+    # Add exporter health metrics
+    add_exporter_health_metrics
+
+    # Generate the complete output
+    output_content = generate_output_content
+
+    # Write to file or STDOUT
+    if @config[:output_file]
+      write_to_file(output_content, @config[:output_file])
+    else
+      puts output_content
+    end
+  end
+
+  def generate_output_content
+    # Capture header output
+    header_lines = []
+    header_metrics = {
+      # Node and environment metrics
+      'puppet_configuration_version' => {
+        help: 'Puppet configuration version currently applied to each node',
+        type: 'gauge'
+      },
+      'puppet_node_count' => {
+        help: 'Number of nodes in each Puppet environment',
+        type: 'gauge'
+      },
+      'puppet_state_overview' => {
+        help: 'Puppet state overview statistics from PuppetDB',
+        type: 'gauge'
+      },
+      'puppet_node_os' => {
+        help: 'Operating system information for each Puppet node',
+        type: 'gauge'
+      },
+      'puppet_node_os_count' => {
+        help: 'Number of nodes running each operating system',
+        type: 'gauge'
+      },
+      'puppet_node_trusted' => {
+        help: 'Trusted facts (role, datacenter) for each Puppet node',
+        type: 'gauge'
+      },
+
+      # Patching metrics
+      'puppet_patching_data' => {
+        help: 'Number of available package updates per node and type',
+        type: 'gauge'
+      },
+      'puppet_patching_detail' => {
+        help: 'Individual packages available for update on each node',
+        type: 'gauge'
+      },
+      'puppet_patch_run' => {
+        help: 'Last patch run timestamp and status for each node',
+        type: 'gauge'
+      },
+      'puppet_restart_required' => {
+        help: 'Whether node requires reboot or application restart',
+        type: 'gauge'
+      },
+      'puppet_patching_blocked' => {
+        help: 'Whether patching is blocked on each node',
+        type: 'gauge'
+      },
+      'puppet_patching_group' => {
+        help: 'Patch group assignment for each node',
+        type: 'gauge'
+      },
+      'puppet_patching_groups' => {
+        help: 'Number of nodes in each patch group',
+        type: 'gauge'
+      },
+      'puppet_patching_stats' => {
+        help: 'Aggregate patching statistics across all nodes',
+        type: 'gauge'
+      },
+
+      # Infrastructure Assistant metrics
+      'puppet_infra_assistant_tokens_total' => {
+        help: 'Total Infrastructure Assistant AI tokens consumed by type',
+        type: 'counter'
+      },
+
+      # Exporter health metrics
+      'puppet_exporter_collection_failed' => {
+        help: 'Failed data collection attempts by collection type and error',
+        type: 'gauge'
+      },
+      'puppet_exporter_scrape_duration_seconds' => {
+        help: 'Time spent collecting all metrics',
+        type: 'gauge'
+      },
+      'puppet_exporter_scrape_success' => {
+        help: 'Whether the metrics scrape was successful (1=success, 0=failure)',
+        type: 'gauge'
+      },
+      'puppet_exporter_last_scrape_timestamp' => {
+        help: 'Timestamp of the last metrics collection attempt',
+        type: 'gauge'
+      }
+    }
+
+    header_metrics.each do |name, info|
+      header_lines << "# HELP #{name} #{info[:help]}"
+      header_lines << "# TYPE #{name} #{info[:type]}"
+    end
+
+    # Filter out nil/empty entries and combine with proper final newline
+    valid_data = @data.compact.reject { |line| line.nil? || line.strip.empty? }
+    (header_lines + valid_data).join("\n") + "\n"
+  end
+
+  def write_to_file(content, file_path)
+    temp_file = "#{file_path}.tmp.#{Process.pid}"
+
+    begin
+      @logger.info("Writing metrics to #{file_path}")
+
+      # Ensure directory exists
+      dir = File.dirname(file_path)
+      unless File.directory?(dir)
+        @logger.error("Directory #{dir} does not exist")
+        raise "Output directory #{dir} does not exist"
+      end
+
+      # Write to temporary file atomically
+      File.open(temp_file, 'w') do |f|
+        f.write(content)
+        f.flush    # Ensure all data is written to OS buffer
+        f.fsync    # Force OS to write to disk
+      end
+
+      # Set proper ownership and permissions if requested
+      if @config[:manage_ownership]
+        set_file_ownership_and_permissions(temp_file)
+      else
+        @logger.debug("Skipping ownership management (MANAGE_OWNERSHIP=false)")
+      end
+
+      # Atomic move to final location
+      File.rename(temp_file, file_path)
+
+      # Verify the file was written correctly
+      final_size = File.size(file_path)
+      @logger.info("Successfully wrote #{@data.length} metrics (#{final_size} bytes) to #{file_path}")
+      @logger.debug("Final file ends with newline: #{File.read(file_path).end_with?("\n")}")
+
+    rescue Errno::EACCES => e
+      @logger.error("Permission denied writing to #{file_path}: #{e.message}")
+      raise
+    rescue Errno::ENOSPC => e
+      @logger.error("No space left on device writing to #{file_path}: #{e.message}")
+      raise
+    rescue StandardError => e
+      @logger.error("Failed to write metrics file #{file_path}: #{e.message}")
+      # Clean up temp file if it exists
+      File.unlink(temp_file) if File.exist?(temp_file)
+      raise
+    end
+  end
+
+  def set_file_ownership_and_permissions(file_path)
+    begin
+      ownership_changed = false
+
+      # Get user and group IDs
+      user_id = begin
+        require 'etc'
+        uid = Etc.getpwnam(@config[:file_owner]).uid
+        @logger.debug("Found user '#{@config[:file_owner]}' with UID #{uid}")
+        uid
+      rescue ArgumentError
+        @logger.warn("User '#{@config[:file_owner]}' not found, keeping current owner")
+        nil
+      rescue => e
+        @logger.warn("Error looking up user '#{@config[:file_owner]}': #{e.message}")
+        nil
+      end
+
+      group_id = begin
+        require 'etc'
+        gid = Etc.getgrnam(@config[:file_group]).gid
+        @logger.debug("Found group '#{@config[:file_group]}' with GID #{gid}")
+        gid
+      rescue ArgumentError
+        @logger.warn("Group '#{@config[:file_group]}' not found, keeping current group")
+        nil
+      rescue => e
+        @logger.warn("Error looking up group '#{@config[:file_group]}': #{e.message}")
+        nil
+      end
+
+      # Set ownership if we have valid IDs
+      if user_id && group_id
+        File.chown(user_id, group_id, file_path)
+        @logger.info("Set ownership to #{@config[:file_owner]}:#{@config[:file_group]}")
+        ownership_changed = true
+      elsif user_id || group_id
+        @logger.warn("Partial ownership change - missing #{user_id ? 'group' : 'user'} information")
+      end
+
+      # Always try to set permissions
+      File.chmod(@config[:file_mode], file_path)
+      @logger.info("Set permissions to #{sprintf('%o', @config[:file_mode])}")
+
+      return ownership_changed
+
+    rescue Errno::EPERM => e
+      @logger.warn("Permission denied changing file ownership/permissions: #{e.message}")
+      @logger.info("This is normal if not running as root or file owner")
+      # Continue execution - file was still written successfully
+      return false
+    rescue Errno::ENOENT => e
+      @logger.error("File not found when setting ownership: #{e.message}")
+      return false
+    rescue StandardError => e
+      @logger.error("Unexpected error setting file ownership/permissions: #{e.message}")
+      # Continue execution - file was still written successfully
+      return false
+    end
+  end
+
+  def add_exporter_health_metrics
+    scrape_duration = Time.now.to_f - @start_time
+    scrape_success = @collection_errors.empty? ? 1 : 0
+
+    @data << build_metric('puppet_exporter_scrape_duration_seconds', {}, scrape_duration.round(3))
+    @data << build_metric('puppet_exporter_scrape_success', {}, scrape_success)
+    @data << build_metric('puppet_exporter_last_scrape_timestamp', {}, Time.now.to_i)
+
+    @logger.info("Metrics collection completed in #{scrape_duration.round(2)}s with #{@collection_errors.length} errors")
+    @logger.info("Generated #{@data.length} total metrics")
+  end
+end
+
+# Command line argument parsing and script execution
+def parse_command_line_arguments
+  options = {}
+
+  parser = OptionParser.new do |opts|
+    opts.banner = "Usage: #{$0} [options]"
+    opts.separator ""
+    opts.separator "Options:"
+
+    opts.on("-o", "--output FILE", "Write metrics to FILE instead of STDOUT") do |file|
+      options[:output_file] = file
+    end
+
+    opts.on("-v", "--verbose", "Enable verbose logging") do
+      ENV['LOG_LEVEL'] = 'DEBUG'
+    end
+
+    opts.on("-q", "--quiet", "Suppress all logging except errors") do
+      ENV['LOG_LEVEL'] = 'ERROR'
+    end
+
+    opts.on("-h", "--help", "Show this help message") do
+      puts opts
+      puts ""
+      puts "Environment variables:"
+      puts "  OUTPUT_FILE               Output file path"
+      puts "  PUPPETDB_HOST             PuppetDB hostname (default: <%= $puppetdb_host %>)"
+      puts "  PUPPETDB_PORT             PuppetDB port (default: <%= $puppetdb_port %>)"
+      puts "  PUPPETDB_PROTOCOL         PuppetDB protocol (default: <%= $puppetdb_protocol %>)"
+      puts "  INFRA_ASSISTANT_HOST      Infrastructure Assistant hostname (default: <%= $infra_assistant_host %>)"
+      puts "  INFRA_ASSISTANT_PORT      Infrastructure Assistant port (default: <%= $infra_assistant_port %>)"
+      puts "  HTTP_TIMEOUT              HTTP request timeout in seconds (default: <%= $http_timeout %>)"
+      puts "  HTTP_RETRIES              Number of retry attempts (default: <%= $http_retries %>)"
+      puts "  MANAGE_OWNERSHIP          Manage file ownership/permissions (default: true, set to 'false' to disable)"
+      puts "  FILE_OWNER                Output file owner (default: pe-puppet)"
+      puts "  FILE_GROUP                Output file group (default: pe-puppet)"
+      puts "  FILE_MODE                 Output file permissions in octal (default: 640)"
+      puts "  LOG_LEVEL                 Log level: DEBUG, INFO, WARN, ERROR (default: <%= $log_level %>)"
+      exit 0
+    end
+
+    opts.on("--version", "Show version information") do
+      puts "Puppet Data Connector Enhancer v1.0"
+      puts "Generates enhanced Puppet metrics for the data connector dropzone"
+      exit 0
+    end
+  end
+
+  begin
+    parser.parse!
+  rescue OptionParser::InvalidOption => e
+    puts "Error: #{e.message}"
+    puts parser
+    exit 1
+  end
+
+  # Override environment variables with command line options
+  ENV['OUTPUT_FILE'] = options[:output_file] if options[:output_file]
+
+  options
+end
+
+# Run the metrics generator
+if __FILE__ == $0
+  begin
+    # Parse command line arguments
+    options = parse_command_line_arguments
+
+    # Create and run the generator
+    generator = PrometheusMetricsGenerator.new
+    generator.generate_metrics
+
+    # Exit with proper code
+    exit 0
+
+  rescue StandardError => e
+    # Log the error if we have a logger, otherwise use STDERR
+    if defined?(generator) && generator.instance_variable_get(:@logger)
+      generator.instance_variable_get(:@logger).fatal("Fatal error: #{e.message}")
+    else
+      STDERR.puts "FATAL: #{e.message}"
+    end
+
+    # Exit with error code
+    exit 1
+  end
+end

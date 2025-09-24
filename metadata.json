@@ -1,0 +1,64 @@
+{
+  "name": "albatrossflavour-puppet_data_connector_enhancer",
+  "version": "1.0.0",
+  "author": "albatrossflavour",
+  "summary": "Puppet module that enhances the puppet_data_connector by pushing additional Puppet infrastructure metrics to the dropzone",
+  "license": "Apache-2.0",
+  "source": "https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer",
+  "project_page": "https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer",
+  "issues_url": "https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer/issues",
+  "description": "This module extends the functionality of the premium puppet_data_connector module by deploying and managing a Ruby script that collects comprehensive Puppet infrastructure metrics and pushes them to the data connector dropzone. It gathers metrics from PuppetDB and Infrastructure Assistant APIs including node management, patch status, security compliance, and AI token usage.",
+  "dependencies": [
+    {
+      "name": "puppetlabs/stdlib",
+      "version_requirement": ">= 9.0.0 < 10.0.0"
+    },
+    {
+      "name": "puppetlabs/cron_core",
+      "version_requirement": ">= 1.0.0 < 2.0.0"
+    }
+  ],
+  "operatingsystem_support": [
+    {
+      "operatingsystem": "CentOS",
+      "operatingsystemrelease": ["7", "8", "9"]
+    },
+    {
+      "operatingsystem": "OracleLinux",
+      "operatingsystemrelease": ["7"]
+    },
+    {
+      "operatingsystem": "RedHat",
+      "operatingsystemrelease": ["7", "8", "9"]
+    },
+    {
+      "operatingsystem": "Scientific",
+      "operatingsystemrelease": ["7"]
+    },
+    {
+      "operatingsystem": "Rocky",
+      "operatingsystemrelease": ["8"]
+    },
+    {
+      "operatingsystem": "AlmaLinux",
+      "operatingsystemrelease": ["8"]
+    },
+    {
+      "operatingsystem": "Debian",
+      "operatingsystemrelease": ["10", "11", "12"]
+    },
+    {
+      "operatingsystem": "Ubuntu",
+      "operatingsystemrelease": ["18.04", "20.04", "22.04"]
+    }
+  ],
+  "requirements": [
+    {
+      "name": "puppet",
+      "version_requirement": ">= 7.24 < 9.0.0"
+    }
+  ],
+  "pdk-version": "3.4.0",
+  "template-url": "pdk-default#3.4.0",
+  "template-ref": "tags/3.4.0-0-gd3cc13f"
+}
