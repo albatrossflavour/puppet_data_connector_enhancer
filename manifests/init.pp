@@ -88,7 +88,7 @@ class puppet_data_connector_enhancer (
   Enum['present', 'absent'] $timer_ensure               = 'present',
   String[1] $timer_interval                             = '*:0/30',
   String[1] $service_user                               = 'pe-puppet',
-  Stdlib::Absolutepath $dropzone                        = lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', ''/opt/puppetlabs/puppet/prometheus_dropzone'),
+  Stdlib::Absolutepath $dropzone                        = lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet/prometheus_dropzone'),
   String[1] $output_filename                            = 'puppet_enhanced_metrics.prom',
 ) {
 
