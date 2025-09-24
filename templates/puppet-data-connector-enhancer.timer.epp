@@ -1,0 +1,11 @@
+<%- | String $timer_interval | -%>
+[Unit]
+Description=Run Puppet Data Connector Enhancer every 30 minutes
+Requires=puppet-data-connector-enhancer.service
+
+[Timer]
+OnCalendar=<%= $timer_interval %>
+Persistent=true
+
+[Install]
+WantedBy=timers.target

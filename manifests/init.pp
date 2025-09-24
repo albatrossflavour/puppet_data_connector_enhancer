@@ -43,17 +43,14 @@
 # @param log_level
 #   The logging level for the script (DEBUG, INFO, WARN, ERROR).
 #
-# @param cron_ensure
-#   Whether the cron job should be present or absent.
+# @param timer_ensure
+#   Whether the systemd timer should be present or absent.
 #
-# @param cron_minute
-#   The minute specification for the cron job.
+# @param timer_interval
+#   The systemd timer interval specification (e.g., '*:0/30' for every 30 minutes).
 #
-# @param cron_hour
-#   The hour specification for the cron job.
-#
-# @param cron_user
-#   The user under which the cron job should run.
+# @param service_user
+#   The user under which the service should run.
 #
 # @param dropzone_path
 #   The path to the dropzone directory. Defaults to the puppet_data_connector configuration.
@@ -72,7 +69,7 @@
 #
 # @example Run every 15 minutes instead of default 30
 #   class { 'puppet_data_connector_enhancer':
-#     cron_minute => '*/15',
+#     timer_interval => '*:0/15',
 #   }
 #
 class puppet_data_connector_enhancer (
@@ -88,10 +85,9 @@ class puppet_data_connector_enhancer (
   Integer[1, 10] $http_retries                          = 3,
   Numeric $retry_delay                                  = 2.0,
   Enum['DEBUG', 'INFO', 'WARN', 'ERROR'] $log_level     = 'INFO',
-  Enum['present', 'absent'] $cron_ensure                = 'present',
-  Variant[String[1], Integer] $cron_minute              = '*/30',
-  Variant[String[1], Integer] $cron_hour                = '*',
-  String[1] $cron_user                                  = 'pe-puppet',
+  Enum['present', 'absent'] $timer_ensure               = 'present',
+  String[1] $timer_interval                             = '*:0/30',
+  String[1] $service_user                               = 'pe-puppet',
   Stdlib::Absolutepath $dropzone_path                   = lookup('puppet_data_connector::dropzone_path', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet-metrics-collector'),
   String[1] $output_filename                            = 'puppet_enhanced_metrics.prom',
 ) {
@@ -120,18 +116,36 @@ class puppet_data_connector_enhancer (
     require => Class['puppet_data_connector'],
   }
 
-  # Create cron job for scheduled execution
-  if $ensure == 'present' and $cron_ensure == 'present' {
-    cron { 'puppet_data_connector_enhancer':
-      ensure  => $cron_ensure,
-      command => "${script_path} -q -o ${dropzone_file}",
-      user    => $cron_user,
-      minute  => $cron_minute,
-      hour    => $cron_hour,
+  # Create systemd service and timer for scheduled execution
+  if $ensure == 'present' and $timer_ensure == 'present' {
+    systemd::unit_file { 'puppet-data-connector-enhancer.service':
+      content => epp('puppet_data_connector_enhancer/puppet-data-connector-enhancer.service.epp', {
+        'script_path' => $script_path,
+        'dropzone_file' => $dropzone_file,
+        'service_user' => $service_user,
+      }),
       require => File[$script_path],
     }
-  } elsif $ensure == 'absent' or $cron_ensure == 'absent' {
-    cron { 'puppet_data_connector_enhancer':
+
+    systemd::unit_file { 'puppet-data-connector-enhancer.timer':
+      content => epp('puppet_data_connector_enhancer/puppet-data-connector-enhancer.timer.epp', {
+        'timer_interval' => $timer_interval,
+      }),
+      require => Systemd::Unit_file['puppet-data-connector-enhancer.service'],
+    }
+
+    service { 'puppet-data-connector-enhancer.timer':
+      ensure  => 'running',
+      enable  => true,
+      require => Systemd::Unit_file['puppet-data-connector-enhancer.timer'],
+    }
+  } elsif $ensure == 'absent' or $timer_ensure == 'absent' {
+    service { 'puppet-data-connector-enhancer.timer':
+      ensure => 'stopped',
+      enable => false,
+    }
+
+    systemd::unit_file { ['puppet-data-connector-enhancer.service', 'puppet-data-connector-enhancer.timer']:
       ensure => 'absent',
     }
   }
