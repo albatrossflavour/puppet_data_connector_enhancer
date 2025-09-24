@@ -1,17 +1,4 @@
 #!/opt/puppetlabs/puppet/bin/ruby
-<%- |
-  String $puppetdb_host,
-  Integer $puppetdb_port,
-  String $puppetdb_protocol,
-  String $infra_assistant_host,
-  Integer $infra_assistant_port,
-  String $infra_assistant_protocol,
-  Integer $http_timeout,
-  Integer $http_retries,
-  Numeric $retry_delay,
-  String $log_level,
-  String $dropzone_file,
-| -%>
 
 require 'json'
 require 'net/http'
@@ -67,10 +54,10 @@ class PrometheusMetricsGenerator
   def load_configuration
     {
       puppetdb_host: ENV['PUPPETDB_HOST'] || '<%= $puppetdb_host %>',
-      puppetdb_port: ENV['PUPPETDB_PORT'] || '<%= $puppetdb_port %>',
+      puppetdb_port: ENV['PUPPETDB_PORT']&.to_i || <%= $puppetdb_port %>,
       puppetdb_protocol: ENV['PUPPETDB_PROTOCOL'] || '<%= $puppetdb_protocol %>',
       infra_assistant_host: ENV['INFRA_ASSISTANT_HOST'] || '<%= $infra_assistant_host %>',
-      infra_assistant_port: ENV['INFRA_ASSISTANT_PORT'] || '<%= $infra_assistant_port %>',
+      infra_assistant_port: ENV['INFRA_ASSISTANT_PORT']&.to_i || <%= $infra_assistant_port %>,
       infra_assistant_protocol: ENV['INFRA_ASSISTANT_PROTOCOL'] || '<%= $infra_assistant_protocol %>',
       http_timeout: ENV['HTTP_TIMEOUT']&.to_i || <%= $http_timeout %>,
       http_retries: ENV['HTTP_RETRIES']&.to_i || <%= $http_retries %>,
