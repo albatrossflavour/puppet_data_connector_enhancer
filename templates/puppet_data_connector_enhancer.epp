@@ -8,6 +8,8 @@ require 'time'
 require 'optparse'
 require 'fileutils'
 require 'set'
+require 'timeout'
+require 'openssl'
 
 # Custom exceptions for better error handling
 class MetricsCollectionError < StandardError
@@ -145,7 +147,18 @@ class PrometheusMetricsGenerator
 
       if uri.scheme == 'https'
         http.use_ssl = true
-        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+
+        # For PE environments, use SSL client certificates for PuppetDB authentication
+        if uri.port == 8081 && File.exist?('/etc/puppetlabs/puppet/ssl/certs/pe-internal-classifier.pem')
+          # Use PE internal classifier certificates for PuppetDB access
+          http.cert = OpenSSL::X509::Certificate.new(File.read('/etc/puppetlabs/puppet/ssl/certs/pe-internal-classifier.pem'))
+          http.key = OpenSSL::PKey::RSA.new(File.read('/etc/puppetlabs/puppet/ssl/private_keys/pe-internal-classifier.pem'))
+          http.ca_file = '/etc/puppetlabs/puppet/ssl/certs/ca.pem'
+          http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+        else
+          # Fallback to no verification for other endpoints
+          http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+        end
       end
 
       request = Net::HTTP::Get.new(uri.request_uri)

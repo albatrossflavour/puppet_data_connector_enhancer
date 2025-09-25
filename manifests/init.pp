@@ -53,7 +53,7 @@
 #
 class puppet_data_connector_enhancer (
   Enum['present', 'absent'] $ensure                     = 'present',
-  Stdlib::Absolutepath $script_path                     = '/usr/local/bin/puppet_data_connector_enhancer.rb',
+  Stdlib::Absolutepath $script_path                     = '/usr/local/bin/puppet_data_connector_enhancer',
   Integer[1, 300] $http_timeout                         = 5,
   Integer[1, 10] $http_retries                          = 3,
   Numeric $retry_delay                                  = 2.0,
@@ -69,7 +69,7 @@ class puppet_data_connector_enhancer (
   # Install the Ruby script
   file { $script_path:
     ensure  => $ensure,
-    content => epp('puppet_data_connector_enhancer/puppet_data_connector_enhancer.rb.epp', {
+    content => epp('puppet_data_connector_enhancer/puppet_data_connector_enhancer.epp', {
       'http_timeout'  => $http_timeout,
       'http_retries'  => $http_retries,
       'retry_delay'   => $retry_delay,

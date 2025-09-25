@@ -13,7 +13,7 @@ describe 'puppet_data_connector_enhancer' do
         it { is_expected.to contain_class('puppet_data_connector_enhancer') }
 
         it {
-          is_expected.to contain_file('/usr/local/bin/puppet_data_connector_enhancer.rb')
+          is_expected.to contain_file('/usr/local/bin/puppet_data_connector_enhancer')
             .with_ensure('present')
             .with_mode('0755')
             .with_owner('root')
@@ -35,7 +35,7 @@ describe 'puppet_data_connector_enhancer' do
         }
 
         it 'generates the correct script content' do
-          is_expected.to contain_file('/usr/local/bin/puppet_data_connector_enhancer.rb')
+          is_expected.to contain_file('/usr/local/bin/puppet_data_connector_enhancer')
             .with_content(%r{log_level.*INFO})
         end
       end
@@ -48,7 +48,7 @@ describe 'puppet_data_connector_enhancer' do
             'retry_delay' => 5.0,
             'log_level' => 'DEBUG',
             'timer_interval' => '*:0/15',
-            'script_path' => '/opt/scripts/enhancer.rb',
+            'script_path' => '/opt/scripts/enhancer',
             'dropzone' => '/custom/dropzone',
             'output_filename' => 'custom_metrics.prom'
           }
@@ -57,7 +57,7 @@ describe 'puppet_data_connector_enhancer' do
         it { is_expected.to compile.with_all_deps }
 
         it {
-          is_expected.to contain_file('/opt/scripts/enhancer.rb')
+          is_expected.to contain_file('/opt/scripts/enhancer')
             .with_ensure('present')
             .with_mode('0755')
             .with_owner('root')
@@ -71,7 +71,7 @@ describe 'puppet_data_connector_enhancer' do
         }
 
         it 'generates the correct script content with custom parameters' do
-          is_expected.to contain_file('/opt/scripts/enhancer.rb')
+          is_expected.to contain_file('/opt/scripts/enhancer')
             .with_content(%r{http_timeout.*30})
             .with_content(%r{http_retries.*5})
             .with_content(%r{retry_delay.*5\.0})
@@ -90,7 +90,7 @@ describe 'puppet_data_connector_enhancer' do
         it { is_expected.to compile.with_all_deps }
 
         it {
-          is_expected.to contain_file('/usr/local/bin/puppet_data_connector_enhancer.rb')
+          is_expected.to contain_file('/usr/local/bin/puppet_data_connector_enhancer')
             .with_ensure('absent')
         }
 
@@ -116,7 +116,7 @@ describe 'puppet_data_connector_enhancer' do
         it { is_expected.to compile.with_all_deps }
 
         it {
-          is_expected.to contain_file('/usr/local/bin/puppet_data_connector_enhancer.rb')
+          is_expected.to contain_file('/usr/local/bin/puppet_data_connector_enhancer')
             .with_ensure('present')
         }
 
@@ -215,7 +215,7 @@ describe 'puppet_data_connector_enhancer' do
       context 'resource ordering' do
         it 'ensures the script is created before the systemd units' do
           is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.service')
-            .that_requires('File[/usr/local/bin/puppet_data_connector_enhancer.rb]')
+            .that_requires('File[/usr/local/bin/puppet_data_connector_enhancer]')
         end
 
         it 'ensures the service is created before the timer' do

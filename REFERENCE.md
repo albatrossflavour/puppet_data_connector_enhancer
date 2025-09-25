@@ -73,7 +73,7 @@ Data type: `Stdlib::Absolutepath`
 
 The full path where the Ruby script will be installed.
 
-Default value: `'/usr/local/bin/puppet_data_connector_enhancer.rb'`
+Default value: `'/usr/local/bin/puppet_data_connector_enhancer'`
 
 ##### <a name="-puppet_data_connector_enhancer--http_timeout"></a>`http_timeout`
 

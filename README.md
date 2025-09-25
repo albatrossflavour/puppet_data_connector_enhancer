@@ -129,7 +129,7 @@ class { 'puppet_data_connector_enhancer':
 
 ```puppet
 class { 'puppet_data_connector_enhancer':
-  script_path      => '/opt/puppet/scripts/enhancer.rb',
+  script_path      => '/opt/puppet/scripts/enhancer',
   dropzone         => '/opt/custom/dropzone',
   output_filename  => 'enhanced_puppet_metrics.prom',
   timer_interval   => '01,31:00',  # Run at 1 and 31 minutes past each hour

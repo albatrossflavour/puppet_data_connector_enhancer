@@ -15,7 +15,7 @@ describe 'puppet_data_connector_enhancer class' do
       apply_manifest(pp, catch_changes: true)
     end
 
-    describe file('/usr/local/bin/puppet_data_connector_enhancer.rb') do
+    describe file('/usr/local/bin/puppet_data_connector_enhancer') do
       it { is_expected.to exist }
       it { is_expected.to be_file }
       it { is_expected.to be_mode 755 }
@@ -48,7 +48,7 @@ describe 'puppet_data_connector_enhancer class' do
 
     describe 'script execution' do
       it 'runs without errors when dependencies are available', if: fact('puppetversion') do
-        result = shell('/usr/local/bin/puppet_data_connector_enhancer.rb --help')
+        result = shell('/usr/local/bin/puppet_data_connector_enhancer --help')
         expect(result.exit_code).to eq(0)
         expect(result.stdout).to match(%r{Usage:})
       end
@@ -59,7 +59,7 @@ describe 'puppet_data_connector_enhancer class' do
     let(:pp) do
       <<-MANIFEST
         class { 'puppet_data_connector_enhancer':
-          script_path        => '/opt/enhancer/script.rb',
+          script_path        => '/opt/enhancer/script',
           timer_interval     => '*:0/15',
           dropzone           => '/tmp/test_dropzone',
           output_filename    => 'test_metrics.prom',
@@ -78,7 +78,7 @@ describe 'puppet_data_connector_enhancer class' do
       apply_manifest(pp, catch_changes: true)
     end
 
-    describe file('/opt/enhancer/script.rb') do
+    describe file('/opt/enhancer/script') do
       it { is_expected.to exist }
       it { is_expected.to be_file }
       it { is_expected.to be_mode 755 }
@@ -96,7 +96,7 @@ describe 'puppet_data_connector_enhancer class' do
 
     describe file('/etc/systemd/system/puppet-data-connector-enhancer.service') do
       its(:content) { is_expected.to match(%r{User=pe-puppet}) }
-      its(:content) { is_expected.to match(%r{/opt/enhancer/script\.rb}) }
+      its(:content) { is_expected.to match(%r{/opt/enhancer/script}) }
       its(:content) { is_expected.to match(%r{/tmp/test_dropzone/test_metrics\.prom}) }
     end
 
@@ -119,7 +119,7 @@ describe 'puppet_data_connector_enhancer class' do
       apply_manifest(pp, catch_changes: true)
     end
 
-    describe file('/usr/local/bin/puppet_data_connector_enhancer.rb') do
+    describe file('/usr/local/bin/puppet_data_connector_enhancer') do
       it { is_expected.not_to exist }
     end
 
@@ -151,7 +151,7 @@ describe 'puppet_data_connector_enhancer class' do
       apply_manifest(pp, catch_changes: true)
     end
 
-    describe file('/usr/local/bin/puppet_data_connector_enhancer.rb') do
+    describe file('/usr/local/bin/puppet_data_connector_enhancer') do
       it { is_expected.to exist }
       it { is_expected.to be_executable }
     end

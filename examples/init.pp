@@ -18,7 +18,7 @@ class { 'puppet_data_connector_enhancer':
 
 # Example 4: Custom paths and timeouts
 class { 'puppet_data_connector_enhancer':
-  script_path     => '/opt/puppet/scripts/enhancer.rb',
+  script_path     => '/opt/puppet/scripts/enhancer',
   dropzone        => '/opt/custom/dropzone',
   output_filename => 'enhanced_metrics.prom',
   http_timeout    => 30,
