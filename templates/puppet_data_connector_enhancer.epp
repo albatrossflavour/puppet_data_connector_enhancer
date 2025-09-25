@@ -56,8 +56,8 @@ class PrometheusMetricsGenerator
   def load_configuration
     {
       puppetdb_host: ENV['PUPPETDB_HOST'] || 'localhost',
-      puppetdb_port: ENV['PUPPETDB_PORT']&.to_i || 8081,
-      puppetdb_protocol: ENV['PUPPETDB_PROTOCOL'] || 'https',
+      puppetdb_port: ENV['PUPPETDB_PORT']&.to_i || 8080,
+      puppetdb_protocol: ENV['PUPPETDB_PROTOCOL'] || 'http',
       infra_assistant_host: ENV['INFRA_ASSISTANT_HOST'] || 'localhost',
       infra_assistant_port: ENV['INFRA_ASSISTANT_PORT']&.to_i || 8145,
       infra_assistant_protocol: ENV['INFRA_ASSISTANT_PROTOCOL'] || 'https',
@@ -148,17 +148,8 @@ class PrometheusMetricsGenerator
       if uri.scheme == 'https'
         http.use_ssl = true
 
-        # For PE environments, use SSL client certificates for PuppetDB authentication
-        if uri.port == 8081 && File.exist?('/etc/puppetlabs/puppet/ssl/certs/pe-internal-classifier.pem')
-          # Use PE internal classifier certificates for PuppetDB access
-          http.cert = OpenSSL::X509::Certificate.new(File.read('/etc/puppetlabs/puppet/ssl/certs/pe-internal-classifier.pem'))
-          http.key = OpenSSL::PKey::RSA.new(File.read('/etc/puppetlabs/puppet/ssl/private_keys/pe-internal-classifier.pem'))
-          http.ca_file = '/etc/puppetlabs/puppet/ssl/certs/ca.pem'
-          http.verify_mode = OpenSSL::SSL::VERIFY_PEER
-        else
-          # Fallback to no verification for other endpoints
-          http.verify_mode = OpenSSL::SSL::VERIFY_NONE
-        end
+        # For HTTPS endpoints, disable SSL verification by default
+        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
       end
 
       request = Net::HTTP::Get.new(uri.request_uri)
@@ -787,8 +778,8 @@ def parse_command_line_arguments
       puts "Environment variables:"
       puts "  OUTPUT_FILE               Output file path"
       puts "  PUPPETDB_HOST             PuppetDB hostname (default: localhost)"
-      puts "  PUPPETDB_PORT             PuppetDB port (default: 8081)"
-      puts "  PUPPETDB_PROTOCOL         PuppetDB protocol (default: https)"
+      puts "  PUPPETDB_PORT             PuppetDB port (default: 8080)"
+      puts "  PUPPETDB_PROTOCOL         PuppetDB protocol (default: http)"
       puts "  INFRA_ASSISTANT_HOST      Infrastructure Assistant hostname (default: localhost)"
       puts "  INFRA_ASSISTANT_PORT      Infrastructure Assistant port (default: 8145)"
       puts "  HTTP_TIMEOUT              HTTP request timeout in seconds (default: <%= $http_timeout %>)"
