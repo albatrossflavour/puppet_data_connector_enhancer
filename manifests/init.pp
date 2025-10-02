@@ -37,6 +37,18 @@
 # @param output_filename
 #   The filename for the metrics output (will be placed in the dropzone).
 #
+# @param puppet_server
+#   The Puppet Server hostname (for Grafana dashboard filters).
+#
+# @param scm_server
+#   The Source Control Management (SCM) server hostname (for Grafana dashboard filters).
+#
+# @param grafana_server
+#   The Grafana server hostname (for Grafana dashboard filters).
+#
+# @param cd4pe_server
+#   The Continuous Delivery for PE (CD4PE) server hostname (for Grafana dashboard filters).
+#
 # @example Basic usage with default parameters
 #   include puppet_data_connector_enhancer
 #
@@ -51,6 +63,13 @@
 #     timer_interval => '*:0/15',
 #   }
 #
+# @example Configure infrastructure servers for Grafana dashboard filters
+#   class { 'puppet_data_connector_enhancer':
+#     scm_server     => 'gitlab.example.com',
+#     grafana_server => 'grafana.example.com',
+#     cd4pe_server   => 'cd4pe.example.com',
+#   }
+#
 class puppet_data_connector_enhancer (
   Enum['present', 'absent'] $ensure                     = 'present',
   Stdlib::Absolutepath $script_path                     = '/usr/local/bin/puppet_data_connector_enhancer',
@@ -62,6 +81,10 @@ class puppet_data_connector_enhancer (
   String[1] $timer_interval                             = '*:0/30',
   Stdlib::Absolutepath $dropzone                        = lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet/prometheus_dropzone'),
   String[1] $output_filename                            = 'puppet_enhanced_metrics.prom',
+  Optional[Stdlib::Fqdn] $puppet_server                 = $facts['puppet_server'],
+  Optional[Stdlib::Fqdn] $scm_server                    = undef,
+  Optional[Stdlib::Fqdn] $grafana_server                = undef,
+  Optional[Stdlib::Fqdn] $cd4pe_server                  = undef,
 ) {
 
   $dropzone_file = "${dropzone}/${output_filename}"
@@ -70,11 +93,15 @@ class puppet_data_connector_enhancer (
   file { $script_path:
     ensure  => $ensure,
     content => epp('puppet_data_connector_enhancer/puppet_data_connector_enhancer.epp', {
-      'http_timeout'  => $http_timeout,
-      'http_retries'  => $http_retries,
-      'retry_delay'   => $retry_delay,
-      'log_level'     => $log_level,
-      'dropzone_file' => $dropzone_file,
+      'http_timeout'   => $http_timeout,
+      'http_retries'   => $http_retries,
+      'retry_delay'    => $retry_delay,
+      'log_level'      => $log_level,
+      'dropzone_file'  => $dropzone_file,
+      'puppet_server'  => pick($puppet_server, ''),
+      'scm_server'     => pick($scm_server, ''),
+      'grafana_server' => pick($grafana_server, ''),
+      'cd4pe_server'   => pick($cd4pe_server, ''),
     }),
     mode    => '0755',
     owner   => 'root',

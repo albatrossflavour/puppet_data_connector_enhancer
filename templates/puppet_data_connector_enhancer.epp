@@ -46,6 +46,7 @@ class PrometheusMetricsGenerator
     collect_with_error_handling('infra_assistant_tokens') { collect_infra_assistant_tokens }
     collect_with_error_handling('trusted_facts') { collect_trusted_facts }
     collect_with_error_handling('patching_info') { collect_patching_info }
+    collect_with_error_handling('infrastructure_config') { collect_infrastructure_config }
 
     output_metrics
   end
@@ -68,7 +69,11 @@ class PrometheusMetricsGenerator
       manage_ownership: ENV['MANAGE_OWNERSHIP'] != 'false',  # Default true, set to 'false' to disable
       file_owner: ENV['FILE_OWNER'] || 'pe-puppet',
       file_group: ENV['FILE_GROUP'] || 'pe-puppet',
-      file_mode: ENV['FILE_MODE']&.to_i(8) || 0o640
+      file_mode: ENV['FILE_MODE']&.to_i(8) || 0o640,
+      puppet_server: '<%= $puppet_server %>',
+      scm_server: '<%= $scm_server %>',
+      grafana_server: '<%= $grafana_server %>',
+      cd4pe_server: '<%= $cd4pe_server %>'
     }
   end
 
@@ -264,6 +269,40 @@ class PrometheusMetricsGenerator
   end
 
   # Data collection methods
+  def collect_infrastructure_config
+    # Auto-discover domain names from node certnames
+    uri = "#{puppetdb_base_url}/pdb/query/v4/nodes"
+    params = { 'query' => '["extract", "certname"]' }
+    nodes = fetch_json_from_puppetdb(uri, params) || []
+
+    domains = Set.new
+    nodes.each do |node|
+      next unless node && node['certname']
+      certname = node['certname']
+      # Extract domain from FQDN (everything after first dot)
+      if certname.include?('.')
+        domain = certname.split('.', 2)[1]
+        domains.add(domain) if domain && !domain.empty?
+      end
+    end
+
+    # Build labels hash, only including non-empty server values
+    labels = {}
+    labels[:puppet_server] = @config[:puppet_server] unless @config[:puppet_server].nil? || @config[:puppet_server].empty?
+    labels[:scm_server] = @config[:scm_server] unless @config[:scm_server].nil? || @config[:scm_server].empty?
+    labels[:grafana_server] = @config[:grafana_server] unless @config[:grafana_server].nil? || @config[:grafana_server].empty?
+    labels[:cd4pe_server] = @config[:cd4pe_server] unless @config[:cd4pe_server].nil? || @config[:cd4pe_server].empty?
+    labels[:domains] = domains.to_a.sort.join(',') unless domains.empty?
+
+    # Only add the metric if we have at least one label
+    if labels.any?
+      @data << build_metric('puppet_infrastructure_config', labels)
+      @logger.info("Infrastructure config: #{labels.map { |k, v| "#{k}=#{v}" }.join(', ')}")
+    else
+      @logger.warn("No infrastructure config parameters provided, skipping metric")
+    end
+  end
+
   def collect_configuration_versions
     uri = "#{puppetdb_base_url}/pdb/query/v4/reports"
     params = { 'query' => '["extract", ["certname", "environment", "configuration_version"], ["=", "latest_report?", true]]' }
@@ -597,6 +636,12 @@ class PrometheusMetricsGenerator
       'puppet_infra_assistant_tokens_total' => {
         help: 'Total Infrastructure Assistant AI tokens consumed by type',
         type: 'counter'
+      },
+
+      # Infrastructure config metrics
+      'puppet_infrastructure_config' => {
+        help: 'Infrastructure server configuration metadata for Grafana dashboard filters',
+        type: 'gauge'
       },
 
       # Exporter health metrics
