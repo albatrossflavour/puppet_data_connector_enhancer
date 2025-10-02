@@ -27,7 +27,8 @@ Puppet::Functions.create_function(:'puppet_data_connector_enhancer::parse_csv') 
 
   def parse_csv(csv_path)
     unless File.exist?(csv_path)
-      raise Puppet::ParseError, "CIS score CSV not found: #{csv_path}. Ensure SCM export script has run and file is readable by pe-puppet user."
+      Puppet.warning("CIS score CSV not found: #{csv_path}. Skipping CIS score export until SCM export runs. This is expected on first run.")
+      return {}
     end
 
     result = {}
@@ -64,9 +65,9 @@ Puppet::Functions.create_function(:'puppet_data_connector_enhancer::parse_csv') 
       }
     end
 
-    # Ensure we actually parsed some data
+    # Warn if CSV exists but contains no data (different from file not existing)
     if result.empty?
-      raise Puppet::ParseError, "CIS score CSV #{csv_path} parsed successfully but contained no valid node data. Check CSV format and contents."
+      Puppet.warning("CIS score CSV #{csv_path} exists but contains no valid node data. Check CSV format and contents.")
     end
 
     result
