@@ -1,19 +1,111 @@
 # @summary Export CIS score data from CSV to PuppetDB as exported resources
 #
-# This class runs only on the PE server during catalog compilation. It parses the
-# CIS summary CSV file (downloaded by the SCM export script) and exports a file resource for
-# each node to PuppetDB. Nodes then collect their specific resource via the client class.
+# This class runs only on the PE server. It manages the SCM export script, systemd timer,
+# parses the CIS summary CSV file, and exports a file resource for each node to PuppetDB.
+# Nodes then collect their specific resource via the client class.
 #
-# @param csv_path
-#   Absolute path to the CSV file containing CIS scores for all nodes.
-#   The file must be readable by the pe-puppet user (mode 0644).
+# @param scm_dir
+#   Base directory for storing SCM scripts and CSV data.
+#
+# @param scm_host
+#   The HTTPS URL of the SCM server.
+#
+# @param scm_auth
+#   The SCM API personal access token for authentication.
+#
+# @param scm_export_retention
+#   Maximum number of API-generated reports to retain on the SCM host.
+#
+# @param scm_poll_interval
+#   Seconds to wait between polling attempts for export completion.
+#
+# @param scm_max_wait_time
+#   Maximum seconds to wait for export completion before timing out.
+#
+# @param scm_timer_interval
+#   The systemd timer interval specification for SCM exports.
 #
 # @example
 #   include puppet_data_connector_enhancer::server
 #
 class puppet_data_connector_enhancer::server (
-  Stdlib::Absolutepath $csv_path = "${puppet_data_connector_enhancer::scm_dir}/score_data/Summary_Report_API.csv",
+  Stdlib::Absolutepath $scm_dir,
+  Stdlib::HTTPSUrl $scm_host,
+  Sensitive[String[1]] $scm_auth,
+  Integer[1] $scm_export_retention,
+  Integer[1] $scm_poll_interval,
+  Integer[1] $scm_max_wait_time,
+  Pattern[/^.+$/] $scm_timer_interval,
 ) {
+  $csv_path = "${scm_dir}/score_data/Summary_Report_API.csv"
+
+  # Create SCM directories
+  file { $scm_dir:
+    ensure => 'directory',
+    owner  => 'root',
+    group  => 'root',
+    mode   => '0755',
+  }
+
+  file { "${scm_dir}/score_data":
+    ensure  => 'directory',
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0755',
+    require => File[$scm_dir],
+  }
+
+  # Deploy SCM export and download script
+  file { "${scm_dir}/export_and_download_cis.rb":
+    ensure  => file,
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0700',
+    content => epp('puppet_data_connector_enhancer/export_and_download_cis.rb.epp', {
+        'scm_host'         => $scm_host,
+        'auth'             => $scm_auth,
+        'export_retention' => $scm_export_retention,
+        'poll_interval'    => $scm_poll_interval,
+        'max_wait_time'    => $scm_max_wait_time,
+    }),
+    require => File[$scm_dir],
+  }
+
+  # Create systemd timer for SCM export
+  systemd::timer { 'puppet-scm-export.timer':
+    timer_content => @("EOT"),
+      [Unit]
+      Description=Run Puppet SCM CIS Score Export
+
+      [Timer]
+      OnCalendar=${scm_timer_interval}
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+      | EOT
+    service_content => @("EOT"),
+      [Unit]
+      Description=Puppet SCM CIS Score Export
+      After=network.target
+
+      [Service]
+      Type=oneshot
+      User=root
+      Group=root
+      ExecStart=${scm_dir}/export_and_download_cis.rb
+      WorkingDirectory=${scm_dir}/score_data
+      StandardOutput=journal
+      StandardError=journal
+
+      [Install]
+      WantedBy=multi-user.target
+      | EOT
+    active  => true,
+    enable  => true,
+    require => File["${scm_dir}/export_and_download_cis.rb"],
+  }
+
   # Parse the CSV file into a hash of node data
   $cis_data = puppet_data_connector_enhancer::parse_csv($csv_path)
 

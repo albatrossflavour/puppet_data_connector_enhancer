@@ -67,6 +67,9 @@
 # @param scm_max_wait_time
 #   Maximum seconds to wait for export completion before timing out. Must be >= 1.
 #
+# @param scm_timer_interval
+#   The systemd timer interval specification for SCM exports (e.g., '*:0/30' for every 30 minutes).
+#
 # @example Basic usage with default parameters
 #   include puppet_data_connector_enhancer
 #
@@ -116,6 +119,7 @@ class puppet_data_connector_enhancer (
   Integer[1] $scm_export_retention                      = 8,
   Integer[1] $scm_poll_interval                         = 30,
   Integer[1] $scm_max_wait_time                         = 900,
+  Pattern[/^.+$/] $scm_timer_interval                   = '*:0/30',
 ) {
 
   $dropzone_file = "${dropzone}/${output_filename}"
@@ -135,40 +139,16 @@ class puppet_data_connector_enhancer (
 
   # SCM CIS Score Collection (server-side only)
   if $enable_scm_collection and $facts['puppet_server'] == $facts['clientcert'] {
-    # Create SCM directories
-    file { $scm_dir:
-      ensure => 'directory',
-      owner  => 'root',
-      group  => 'root',
-      mode   => '0755',
+    # Include server class - contains all SCM export logic and fact resource exports
+    class { 'puppet_data_connector_enhancer::server':
+      scm_dir              => $scm_dir,
+      scm_host             => $scm_host,
+      scm_auth             => $scm_auth,
+      scm_export_retention => $scm_export_retention,
+      scm_poll_interval    => $scm_poll_interval,
+      scm_max_wait_time    => $scm_max_wait_time,
+      scm_timer_interval   => $scm_timer_interval,
     }
-
-    file { "${scm_dir}/score_data":
-      ensure  => 'directory',
-      owner   => 'root',
-      group   => 'root',
-      mode    => '0755',
-      require => File[$scm_dir],
-    }
-
-    # Deploy SCM export and download script
-    file { "${scm_dir}/export_and_download_cis.rb":
-      ensure  => file,
-      owner   => 'root',
-      group   => 'root',
-      mode    => '0700',
-      content => epp('puppet_data_connector_enhancer/export_and_download_cis.rb.epp', {
-          'scm_host'         => $scm_host,
-          'auth'             => $scm_auth,
-          'export_retention' => $scm_export_retention,
-          'poll_interval'    => $scm_poll_interval,
-          'max_wait_time'    => $scm_max_wait_time,
-      }),
-      require => File[$scm_dir],
-    }
-
-    # Include server class to export CIS fact resources
-    include puppet_data_connector_enhancer::server
   }
 
   # All nodes collect their CIS score facts (if SCM collection is enabled)
