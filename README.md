@@ -183,7 +183,7 @@ The module can optionally integrate with Puppet Security Compliance Management (
 ```puppet
 class { 'puppet_data_connector_enhancer':
   enable_scm_collection => true,
-  scm_host              => 'https://scm.example.com',
+  scm_server            => 'scm.example.com',
   scm_auth              => Sensitive(lookup('scm_api_token')),
 }
 ```
@@ -193,7 +193,7 @@ class { 'puppet_data_connector_enhancer':
 ```puppet
 class { 'puppet_data_connector_enhancer':
   enable_scm_collection  => true,
-  scm_host               => 'https://scm.example.com',
+  scm_server             => 'scm.example.com',
   scm_auth               => Sensitive(lookup('scm_api_token')),
   scm_export_retention   => 14,           # Keep 14 days of exports
   scm_poll_interval      => 45,           # Poll every 45 seconds

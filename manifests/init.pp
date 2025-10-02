@@ -41,7 +41,7 @@
 #   The Puppet Server hostname (for Grafana dashboard filters).
 #
 # @param scm_server
-#   The Source Control Management (SCM) server hostname (for Grafana dashboard filters).
+#   The Security Compliance Management (SCM) server hostname. Used for both Grafana dashboard filters and as the SCM API host when enable_scm_collection is true.
 #
 # @param grafana_server
 #   The Grafana server hostname (for Grafana dashboard filters).
@@ -51,9 +51,6 @@
 #
 # @param enable_scm_collection
 #   Whether to enable SCM CIS score collection and export functionality.
-#
-# @param scm_host
-#   The HTTPS URL of the Security Compliance Management (SCM) server (required if enable_scm_collection is true).
 #
 # @param scm_auth
 #   The SCM API personal access token for authentication. Should not include 'Bearer' prefix (required if enable_scm_collection is true).
@@ -76,7 +73,7 @@
 # @example Enable SCM CIS score collection
 #   class { 'puppet_data_connector_enhancer':
 #     enable_scm_collection => true,
-#     scm_host              => 'https://scm.example.com',
+#     scm_server            => 'scm.example.com',
 #     scm_auth              => Sensitive(lookup('scm_api_token')),
 #   }
 #
@@ -114,7 +111,6 @@ class puppet_data_connector_enhancer (
   Optional[Stdlib::Fqdn] $grafana_server                = undef,
   Optional[Stdlib::Fqdn] $cd4pe_server                  = undef,
   Boolean $enable_scm_collection                        = false,
-  Optional[Stdlib::HTTPSUrl] $scm_host                  = undef,
   Optional[Sensitive[String[1]]] $scm_auth              = undef,
   Stdlib::Absolutepath $scm_dir                         = '/opt/puppetlabs/puppet_data_connector_enhancer',
   Integer[1] $scm_export_retention                      = 8,
@@ -126,9 +122,15 @@ class puppet_data_connector_enhancer (
 
   # Validate SCM configuration if enabled
   if $enable_scm_collection {
-    if !$scm_host or !$scm_auth {
-      fail('enable_scm_collection is true but scm_host and/or scm_auth are not configured')
+    if !$scm_server or !$scm_auth {
+      fail('enable_scm_collection is true but scm_server and/or scm_auth are not configured')
     }
+  }
+
+  # Build SCM host URL from scm_server
+  $scm_host = $scm_server ? {
+    undef   => undef,
+    default => "https://${scm_server}",
   }
 
   # SCM CIS Score Collection (server-side only)
