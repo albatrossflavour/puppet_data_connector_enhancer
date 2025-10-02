@@ -139,8 +139,8 @@ class puppet_data_connector_enhancer (
 
   # SCM CIS Score Collection (server-side only)
   if $enable_scm_collection and $facts['puppet_server'] == $facts['clientcert'] {
-    # Include server class - contains all SCM export logic and fact resource exports
-    class { 'puppet_data_connector_enhancer::server':
+    # Include SCM class - contains all SCM export logic and fact resource exports
+    class { 'puppet_data_connector_enhancer::scm':
       scm_dir              => $scm_dir,
       scm_host             => $scm_host,
       scm_auth             => $scm_auth,

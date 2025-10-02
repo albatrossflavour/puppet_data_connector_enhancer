@@ -1,7 +1,9 @@
-# @summary Export CIS score data from CSV to PuppetDB as exported resources
+# @summary Manage SCM CIS score collection and distribution
+# @api private
 #
-# This class runs only on the PE server. It manages the SCM export script, systemd timer,
-# parses the CIS summary CSV file, and exports a file resource for each node to PuppetDB.
+# This private class runs only on the PE server when SCM collection is enabled.
+# It manages the SCM export script, systemd timer, parses the CIS summary CSV file,
+# and exports a file resource for each node to PuppetDB.
 # Nodes then collect their specific resource via the client class.
 #
 # @param scm_dir
@@ -25,10 +27,7 @@
 # @param scm_timer_interval
 #   The systemd timer interval specification for SCM exports.
 #
-# @example
-#   include puppet_data_connector_enhancer::server
-#
-class puppet_data_connector_enhancer::server (
+class puppet_data_connector_enhancer::scm (
   Stdlib::Absolutepath $scm_dir,
   Stdlib::HTTPSUrl $scm_host,
   Sensitive[String[1]] $scm_auth,
