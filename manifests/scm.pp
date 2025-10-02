@@ -66,6 +66,7 @@ class puppet_data_connector_enhancer::scm (
         'export_retention' => $scm_export_retention,
         'poll_interval'    => $scm_poll_interval,
         'max_wait_time'    => $scm_max_wait_time,
+        'scm_dir'          => $scm_dir,
     }),
     require => File[$scm_dir],
   }

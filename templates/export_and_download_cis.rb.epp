@@ -3,6 +3,7 @@
       Integer $export_retention,
       Integer $poll_interval,
       Integer $max_wait_time,
+      String $scm_dir,
 | -%>
 #!/opt/puppetlabs/puppet/bin/ruby
 #
@@ -139,12 +140,12 @@ end
 
 #################################################################################################################################
 
-def process_export(cis_dir, t_stamp, log)
+def process_export(scm_dir, t_stamp, log)
   # The export is a zip file, unzip, uncompress
   log.info('Processing export file')
 
   zip_file = 'compliance_summary_report.zip'
-  docroot = "#{cis_dir}/score_data"
+  score_data_dir = "#{scm_dir}/score_data"
 
   if File.exist?(zip_file)
     tmp_dir = 'Summary_Report_' + t_stamp.strftime('%d_%m_%Y_%H_%M_%S')
@@ -157,13 +158,13 @@ def process_export(cis_dir, t_stamp, log)
     if system("unzip #{zip_file} > /dev/null")
       system("find . -name \"*.gz\" -exec gzip -d {} \\; > /dev/null")
       # rubocop:enable Style/StringLiterals
-      if File.exist?("#{docroot}/#{tmp_dir}/Summary_Report_API.csv")
+      if File.exist?("#{score_data_dir}/#{tmp_dir}/Summary_Report_API.csv")
         # csv confirmed start clean-up
         File.delete(zip_file)
-        FileUtils.mv('Summary_Report_API.csv', docroot)
+        FileUtils.mv('Summary_Report_API.csv', score_data_dir)
         # Set permissions so pe-puppet user can read the CSV during catalog compilation
-        File.chmod(0644, "#{docroot}/Summary_Report_API.csv")
-        Dir.chdir(docroot)
+        File.chmod(0644, "#{score_data_dir}/Summary_Report_API.csv")
+        Dir.chdir(score_data_dir)
         Dir.delete(tmp_dir)
         log.info('Export processed successfully')
       else
@@ -221,8 +222,8 @@ begin
   scm_host = '<%=$scm_host %>'
   auth = 'Bearer <%=$auth %>'
   current_time = Time.now.utc.getlocal
-  cis_dir = '/opt/puppetlabs/puppet_data_connector_enhancer'
-  docroot = '/opt/puppetlabs/puppet_data_connector_enhancer/score_data'
+  scm_dir = '<%=$scm_dir %>'
+  score_data_dir = '<%=$scm_dir %>/score_data'
   poll_interval = <%=$poll_interval %>
   max_wait_time = <%=$max_wait_time %>
   export_retention = <%=$export_retention %>
@@ -237,9 +238,9 @@ begin
   completed_export = poll_for_export(export_id, scm_host, auth, poll_interval, max_wait_time, log)
 
   # Download and process
-  Dir.chdir(docroot)
+  Dir.chdir(score_data_dir)
   download_export(completed_export, scm_host, auth, log)
-  process_export(cis_dir, current_time, log)
+  process_export(scm_dir, current_time, log)
 
   # Clean up old exports
   all_exports = list_exports(scm_host, auth, log)
