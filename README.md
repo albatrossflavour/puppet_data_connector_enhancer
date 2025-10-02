@@ -168,6 +168,55 @@ The enhancer automatically discovers the dropzone path using:
 lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet/prometheus_dropzone')
 ```
 
+### SCM CIS Score Collection (Optional)
+
+The module can optionally integrate with Puppet Security Compliance Management (SCM) to collect and distribute CIS benchmark scores as structured facts to all managed nodes.
+
+**How it works:**
+
+1. **Server-side** (PE server only): Creates exports from SCM API, downloads compliance reports, parses CSV, and exports fact resources to PuppetDB
+2. **Client-side** (all nodes): Collects exported fact resource containing node-specific CIS scores
+3. **Metrics collection**: Main enhancer script reads `cis_score` fact and pushes to Prometheus
+
+**Enable SCM integration:**
+
+```puppet
+class { 'puppet_data_connector_enhancer':
+  enable_scm_collection => true,
+  scm_host              => 'https://scm.example.com',
+  scm_auth              => Sensitive(lookup('scm_api_token')),
+}
+```
+
+**With custom polling and retention:**
+
+```puppet
+class { 'puppet_data_connector_enhancer':
+  enable_scm_collection  => true,
+  scm_host               => 'https://scm.example.com',
+  scm_auth               => Sensitive(lookup('scm_api_token')),
+  scm_export_retention   => 14,           # Keep 14 days of exports
+  scm_poll_interval      => 45,           # Poll every 45 seconds
+  scm_max_wait_time      => 1200,         # Timeout after 20 minutes
+}
+```
+
+**The `cis_score` structured fact contains:**
+
+- `scan_timestamp`: ISO 8601 timestamp of scan
+- `scan_type`: Type of scan (e.g., "ad hoc")
+- `scanned_benchmark`: CIS benchmark name and version
+- `scanned_profile`: Profile applied (e.g., "Level 1 - Server")
+- `adjusted_compliance_score`: Score after exceptions
+- `exception_score`: Score including exceptions
+
+**Requirements for SCM integration:**
+
+- Puppet Security Compliance Management (SCM) v3.x or later
+- SCM personal access token for API authentication
+- CIS benchmarks applied and assessor running on managed nodes
+- `unzip` and `gzip` utilities on PE server
+
 ## Reference
 
 This module is documented using Puppet Strings. For detailed parameter information, see the generated [REFERENCE.md](REFERENCE.md) or run:

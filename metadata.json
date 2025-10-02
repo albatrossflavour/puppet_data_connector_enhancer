@@ -1,13 +1,13 @@
 {
   "name": "albatrossflavour-puppet_data_connector_enhancer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "albatrossflavour",
-  "summary": "Puppet module that enhances the puppet_data_connector by pushing additional Puppet infrastructure metrics to the dropzone",
+  "summary": "Puppet module that enhances the puppet_data_connector by pushing additional Puppet infrastructure metrics to the dropzone, including optional SCM CIS score collection",
   "license": "Apache-2.0",
   "source": "https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer",
   "project_page": "https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer",
   "issues_url": "https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer/issues",
-  "description": "This module extends the functionality of the premium puppet_data_connector module by deploying and managing a Ruby script that collects comprehensive Puppet infrastructure metrics and pushes them to the data connector dropzone. It gathers metrics from PuppetDB and Infrastructure Assistant APIs including node management, patch status, security compliance, and AI token usage.",
+  "description": "This module extends the functionality of the premium puppet_data_connector module by deploying and managing a Ruby script that collects comprehensive Puppet infrastructure metrics and pushes them to the data connector dropzone. It gathers metrics from PuppetDB and Infrastructure Assistant APIs including node management, patch status, security compliance, and AI token usage. Optionally integrates with Puppet Security Compliance Management (SCM) to collect and distribute CIS benchmark scores as structured facts.",
   "dependencies": [
     {
       "name": "puppetlabs/puppet_data_connector",

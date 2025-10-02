@@ -1,1 +1,11 @@
-{}
+---
+# Default parameters for puppet_data_connector_enhancer module
+
+# SCM CIS Score Collection (optional - disabled by default)
+puppet_data_connector_enhancer::enable_scm_collection: false
+puppet_data_connector_enhancer::scm_host: ~
+puppet_data_connector_enhancer::scm_auth: ~
+puppet_data_connector_enhancer::scm_dir: "/opt/puppetlabs/puppet_data_connector_enhancer"
+puppet_data_connector_enhancer::scm_export_retention: 8
+puppet_data_connector_enhancer::scm_poll_interval: 30     # Seconds between polling attempts
+puppet_data_connector_enhancer::scm_max_wait_time: 900    # Maximum wait time (15 minutes)

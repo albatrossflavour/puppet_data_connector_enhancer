@@ -1,0 +1,254 @@
+<%- | String $scm_host,
+      Sensitive[String] $auth,
+      Integer $export_retention,
+      Integer $poll_interval,
+      Integer $max_wait_time,
+| -%>
+#!/opt/puppetlabs/puppet/bin/ruby
+#
+# Name: export_and_download_cis.rb
+# Purpose: To create, poll for completion, and download CIS summary report from SCM host
+#
+
+require 'net/http'
+require 'openssl'
+require 'uri'
+require 'json'
+require 'time'
+require 'fileutils'
+require 'logger'
+
+# Set up logging
+log = Logger.new('/var/log/puppetlabs/puppet_data_connector_enhancer_scm.log')
+log.level = Logger::INFO
+
+#################################################################################################################################
+
+def create_export(host, token, log)
+  # Generate a new "compliance_status_summary" report
+  log.info('Creating new compliance_status_summary export')
+
+  create_export_api = '/api/public/v1/export-job'
+  report_title = 'Summary_Report_API'
+  url = URI(host + create_export_api)
+
+  http = Net::HTTP.new(url.host, url.port)
+  http.use_ssl = true
+  http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+  request = Net::HTTP::Post.new(url)
+  request['Content-Type'] = 'application/json'
+  request['Accept'] = 'application/json'
+  request['Authorization'] = token
+  request.body = JSON.dump({ 'type': 'compliance_status_summary', 'description': 'API Generated', 'name': report_title })
+  response = http.request(request)
+
+  if response.code == '201'
+    result = JSON.parse(response.body)
+    log.info("Export job created successfully with ID: #{result['id']}")
+    return result
+  else
+    log.error("HTTP Error from create_export: #{response.code} - #{response.body}")
+    abort "HTTP Error from <create_export>: #{response.code}"
+  end
+end
+
+#################################################################################################################################
+
+def list_exports(host, token, log)
+  # API reports query
+  list_api = '/api/public/v1/exports'
+  url = URI(host + list_api)
+
+  http = Net::HTTP.new(url.host, url.port)
+  http.use_ssl = true
+  http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+
+  request = Net::HTTP::Get.new(url)
+  request['Accept'] = 'application/json'
+  request['Authorization'] = token
+
+  response = http.request(request)
+
+  if response.code == '200'
+    return JSON.parse(response.body)
+  else
+    log.error("HTTP Error from list_exports: #{response.code}")
+    abort "HTTP Error from <list_exports>: #{response.code}"
+  end
+end
+
+#################################################################################################################################
+
+def poll_for_export(export_id, host, token, poll_interval, max_wait, log)
+  # Poll for export completion
+  log.info("Polling for export ID #{export_id} completion (max wait: #{max_wait}s, interval: #{poll_interval}s)")
+
+  start_time = Time.now
+  attempts = 0
+
+  loop do
+    attempts += 1
+    elapsed = Time.now - start_time
+
+    if elapsed > max_wait
+      log.error("Export polling timeout after #{elapsed.round}s (#{attempts} attempts)")
+      abort "Timeout waiting for export #{export_id} to complete after #{max_wait}s"
+    end
+
+    exports = list_exports(host, token, log)
+    export = exports.find { |e| e['id'] == export_id }
+
+    if export
+      log.info("Export #{export_id} found after #{elapsed.round}s (#{attempts} attempts)")
+      return export
+    end
+
+    log.debug("Export #{export_id} not ready, waiting #{poll_interval}s (attempt #{attempts}, elapsed #{elapsed.round}s)")
+    sleep poll_interval
+  end
+end
+
+#################################################################################################################################
+
+def download_export(report, host, token, log)
+  # Download the compliance report
+  log.info("Downloading export ID: #{report['id']}")
+
+  r_id = report['id'].to_s
+  file_name = 'compliance_summary_report.zip'
+  download_api = '/api/public/v1/export/' + r_id + '/file'
+
+  url = URI(host + download_api)
+  http = Net::HTTP.new(url.host, url.port)
+  http.use_ssl = true
+  http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+  request = Net::HTTP::Get.new(url)
+  request['Authorization'] = token
+  response = http.request(request)
+
+  if response.code == '200'
+    file = File.new(file_name, 'w')
+    file.puts(response.body)
+    file.close
+    log.info("Export downloaded successfully to #{file_name}")
+  else
+    log.error("HTTP Error from download_export: #{response.code}")
+    abort "HTTP Error from <download_export>: #{response.code}"
+  end
+end
+
+#################################################################################################################################
+
+def process_export(cis_dir, t_stamp, log)
+  # The export is a zip file, unzip, uncompress
+  log.info('Processing export file')
+
+  zip_file = 'compliance_summary_report.zip'
+  docroot = "#{cis_dir}/score_data"
+
+  if File.exist?(zip_file)
+    tmp_dir = 'Summary_Report_' + t_stamp.strftime('%d_%m_%Y_%H_%M_%S')
+    Dir.mkdir(tmp_dir)
+    FileUtils.mv(zip_file, tmp_dir)
+    Dir.chdir(tmp_dir)
+    # unzip the download and uncompress the gz files
+    # Requires double quotes despite the linting suggestions !
+    # rubocop:disable Style/StringLiterals
+    if system("unzip #{zip_file} > /dev/null")
+      system("find . -name \"*.gz\" -exec gzip -d {} \\; > /dev/null")
+      # rubocop:enable Style/StringLiterals
+      if File.exist?("#{docroot}/#{tmp_dir}/Summary_Report_API.csv")
+        # csv confirmed start clean-up
+        File.delete(zip_file)
+        FileUtils.mv('Summary_Report_API.csv', docroot)
+        # Set permissions so pe-puppet user can read the CSV during catalog compilation
+        File.chmod(0644, "#{docroot}/Summary_Report_API.csv")
+        Dir.chdir(docroot)
+        Dir.delete(tmp_dir)
+        log.info('Export processed successfully')
+      else
+        log.error('CSV file not detected after extraction')
+        puts 'Something went wrong, csv file not detected'
+      end
+    else
+      log.error("Unzip of #{zip_file} failed")
+      puts "Unzip of #{zip_file} failed"
+    end
+  else
+    log.warn('No zip file present, nothing to do')
+    puts 'No zip file present, nothing to do'
+  end
+end
+
+#################################################################################################################################
+
+def clean_up(list, host, token, retain, log)
+  # Only retain the specified number of reports generated by this module
+  log.info("Cleaning up old exports (retention: #{retain})")
+
+  api_reports = list.filter {|t| t['type'] == 'compliance_status_summary' && t['description'] == 'API Generated' }
+  sorted_list = api_reports.sort_by {|time| time[:created_at]}
+
+  if sorted_list.count > retain
+    delete_count = sorted_list.count - (retain + 1)
+    log.info("Deleting #{delete_count + 1} old exports")
+    sorted_list[0..delete_count].each do | item |
+      delete_api = '/api/public/v1/export/' + "#{item['id']}"
+      url = URI(host + delete_api)
+      http = Net::HTTP.new(url.host, url.port)
+      http.use_ssl = true
+      http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+      request = Net::HTTP::Delete.new(url)
+      request["Authorization"] = token
+      response = http.request(request)
+
+      if response.code == '204'
+        log.info("Deleted export ID: #{item['id']}")
+      else
+        log.error("HTTP Error from clean_up: #{response.code} for export ID #{item['id']}")
+        abort "HTTP Error from <clean_up>: #{response.code}"
+      end
+    end
+  else
+    log.info("No cleanup needed (#{sorted_list.count} exports, retention: #{retain})")
+  end
+end
+
+#################################################################################################################################
+
+begin
+  # Declare variables
+  scm_host = '<%=$scm_host %>'
+  auth = 'Bearer <%=$auth %>'
+  current_time = Time.now.utc.getlocal
+  cis_dir = '/opt/puppetlabs/puppet_data_connector_enhancer'
+  docroot = '/opt/puppetlabs/puppet_data_connector_enhancer/score_data'
+  poll_interval = <%=$poll_interval %>
+  max_wait_time = <%=$max_wait_time %>
+  export_retention = <%=$export_retention %>
+
+  log.info('=== Starting CIS export and download process ===')
+
+  # Create new export
+  new_export = create_export(scm_host, auth, log)
+  export_id = new_export['id']
+
+  # Poll for completion
+  completed_export = poll_for_export(export_id, scm_host, auth, poll_interval, max_wait_time, log)
+
+  # Download and process
+  Dir.chdir(docroot)
+  download_export(completed_export, scm_host, auth, log)
+  process_export(cis_dir, current_time, log)
+
+  # Clean up old exports
+  all_exports = list_exports(scm_host, auth, log)
+  clean_up(all_exports, scm_host, auth, export_retention, log)
+
+  log.info('=== CIS export and download process completed successfully ===')
+
+rescue StandardError => e
+  log.fatal("Fatal error: #{e.class} - #{e.message}")
+  log.fatal(e.backtrace.join("\n"))
+  abort "Fatal error: #{e.message}"
+end

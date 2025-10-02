@@ -1,0 +1,20 @@
+<%- |
+  String $scan_timestamp,
+  String $scan_type,
+  String $scanned_benchmark,
+  String $scanned_profile,
+  String $adjusted_compliance_score,
+  String $exception_score,
+| -%>
+<%# External fact YAML file template for CIS compliance scores
+    This file is created by exported resources and loaded by Facter
+    as the 'cis_score' structured fact.
+-%>
+---
+cis_score:
+  scan_timestamp: '<%= $scan_timestamp %>'
+  scan_type: '<%= $scan_type %>'
+  scanned_benchmark: '<%= $scanned_benchmark %>'
+  scanned_profile: '<%= $scanned_profile %>'
+  adjusted_compliance_score: '<%= $adjusted_compliance_score %>'
+  exception_score: '<%= $exception_score %>'

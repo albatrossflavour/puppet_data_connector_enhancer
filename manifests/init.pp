@@ -49,8 +49,36 @@
 # @param cd4pe_server
 #   The Continuous Delivery for PE (CD4PE) server hostname (for Grafana dashboard filters).
 #
+# @param enable_scm_collection
+#   Whether to enable SCM CIS score collection and export functionality.
+#
+# @param scm_host
+#   The HTTPS URL of the Security Compliance Management (SCM) server (required if enable_scm_collection is true).
+#
+# @param scm_auth
+#   The SCM API personal access token for authentication. Should not include 'Bearer' prefix (required if enable_scm_collection is true).
+#
+# @param scm_dir
+#   Base directory for storing SCM scripts and CSV data. Must be an absolute path.
+#
+# @param scm_export_retention
+#   Maximum number of API-generated reports to retain on the SCM host. Must be >= 1.
+#
+# @param scm_poll_interval
+#   Seconds to wait between polling attempts for export completion. Must be >= 1.
+#
+# @param scm_max_wait_time
+#   Maximum seconds to wait for export completion before timing out. Must be >= 1.
+#
 # @example Basic usage with default parameters
 #   include puppet_data_connector_enhancer
+#
+# @example Enable SCM CIS score collection
+#   class { 'puppet_data_connector_enhancer':
+#     enable_scm_collection => true,
+#     scm_host              => 'https://scm.example.com',
+#     scm_auth              => Sensitive(lookup('scm_api_token')),
+#   }
 #
 # @example Custom timeouts and debugging
 #   class { 'puppet_data_connector_enhancer':
@@ -85,9 +113,66 @@ class puppet_data_connector_enhancer (
   Optional[Stdlib::Fqdn] $scm_server                    = undef,
   Optional[Stdlib::Fqdn] $grafana_server                = undef,
   Optional[Stdlib::Fqdn] $cd4pe_server                  = undef,
+  Boolean $enable_scm_collection                        = false,
+  Optional[Stdlib::HTTPSUrl] $scm_host                  = undef,
+  Optional[Sensitive[String[1]]] $scm_auth              = undef,
+  Stdlib::Absolutepath $scm_dir                         = '/opt/puppetlabs/puppet_data_connector_enhancer',
+  Integer[1] $scm_export_retention                      = 8,
+  Integer[1] $scm_poll_interval                         = 30,
+  Integer[1] $scm_max_wait_time                         = 900,
 ) {
 
   $dropzone_file = "${dropzone}/${output_filename}"
+
+  # Validate SCM configuration if enabled
+  if $enable_scm_collection {
+    if !$scm_host or !$scm_auth {
+      fail('enable_scm_collection is true but scm_host and/or scm_auth are not configured')
+    }
+  }
+
+  # SCM CIS Score Collection (server-side only)
+  if $enable_scm_collection and $facts['puppet_server'] == $facts['clientcert'] {
+    # Create SCM directories
+    file { $scm_dir:
+      ensure => 'directory',
+      owner  => 'root',
+      group  => 'root',
+      mode   => '0755',
+    }
+
+    file { "${scm_dir}/score_data":
+      ensure  => 'directory',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0755',
+      require => File[$scm_dir],
+    }
+
+    # Deploy SCM export and download script
+    file { "${scm_dir}/export_and_download_cis.rb":
+      ensure  => file,
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0700',
+      content => epp('puppet_data_connector_enhancer/export_and_download_cis.rb.epp', {
+          'scm_host'         => $scm_host,
+          'auth'             => $scm_auth,
+          'export_retention' => $scm_export_retention,
+          'poll_interval'    => $scm_poll_interval,
+          'max_wait_time'    => $scm_max_wait_time,
+      }),
+      require => File[$scm_dir],
+    }
+
+    # Include server class to export CIS fact resources
+    include puppet_data_connector_enhancer::server
+  }
+
+  # All nodes collect their CIS score facts (if SCM collection is enabled)
+  if $enable_scm_collection {
+    include puppet_data_connector_enhancer::client
+  }
 
   # Install the Ruby script
   file { $script_path:
