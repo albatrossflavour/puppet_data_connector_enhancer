@@ -46,6 +46,7 @@ class PrometheusMetricsGenerator
     collect_with_error_handling('infra_assistant_tokens') { collect_infra_assistant_tokens }
     collect_with_error_handling('trusted_facts') { collect_trusted_facts }
     collect_with_error_handling('patching_info') { collect_patching_info }
+    collect_with_error_handling('cis_score') { collect_cis_score }
     collect_with_error_handling('infrastructure_config') { collect_infrastructure_config }
 
     output_metrics
@@ -540,6 +541,52 @@ class PrometheusMetricsGenerator
     end
   end
 
+  def collect_cis_score
+    uri = "#{puppetdb_base_url}/pdb/query/v4/facts/cis_score"
+    params = {}
+    cis_data = fetch_json_from_puppetdb(uri, params)
+
+    return unless cis_data && cis_data.is_a?(Array)
+
+    cis_data.each do |entry|
+      next unless entry && entry['value']
+      certname = entry['certname']
+      environment = entry['environment']
+
+      adjusted_score = entry.dig('value', 'adjusted_compliance_score')
+      base_score = entry.dig('value', 'exception_score')
+      scan_timestamp = entry.dig('value', 'scan_timestamp')
+      scanned_benchmark = entry.dig('value', 'scanned_benchmark')
+      scanned_profile = entry.dig('value', 'scanned_profile')
+
+      # Base compliance score (before exceptions)
+      if base_score
+        @data << build_metric('puppet_cis_compliance_score', {
+          node: certname,
+          environment: environment,
+          score_type: 'base',
+          scan_timestamp: scan_timestamp,
+          benchmark: scanned_benchmark,
+          profile: scanned_profile
+        }, base_score.to_i)
+      end
+
+      # Adjusted compliance score (with exceptions applied)
+      if adjusted_score
+        @data << build_metric('puppet_cis_compliance_score', {
+          node: certname,
+          environment: environment,
+          score_type: 'adjusted',
+          scan_timestamp: scan_timestamp,
+          benchmark: scanned_benchmark,
+          profile: scanned_profile
+        }, adjusted_score.to_i)
+      end
+    end
+
+    @logger.debug("Collected CIS compliance scores for #{cis_data.length} nodes")
+  end
+
   def output_metrics
     # Add summary statistics
     @data << build_metric('puppet_patching_stats', { type: 'nodes_to_patch' }, @patch_count)
@@ -595,6 +642,12 @@ class PrometheusMetricsGenerator
       },
       'puppet_node_trusted' => {
         help: 'Trusted facts (role, datacenter) for each Puppet node',
+        type: 'gauge'
+      },
+
+      # CIS compliance metrics
+      'puppet_cis_compliance_score' => {
+        help: 'CIS compliance score per node (base and adjusted with exceptions)',
         type: 'gauge'
       },
 
