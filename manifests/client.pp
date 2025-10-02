@@ -16,7 +16,20 @@
 #
 class puppet_data_connector_enhancer::client {
   # Collect the exported file resource tagged for this specific node
-  # The path and ownership are already set correctly based on this node's OS
+  # Override path and ownership based on this node's OS
   # These resources are exported by puppet_data_connector_enhancer::scm
-  File <<| tag == "cis_score_${trusted['certname']}" |>>
+  File <<| tag == "cis_score_${trusted['certname']}" |>> {
+    path  => $facts['os']['family'] ? {
+      'windows' => 'C:/ProgramData/PuppetLabs/facter/facts.d/cis_score.yaml',
+      default   => '/opt/puppetlabs/facter/facts.d/cis_score.yaml',
+    },
+    owner => $facts['os']['family'] ? {
+      'windows' => undef,
+      default   => 'root',
+    },
+    group => $facts['os']['family'] ? {
+      'windows' => undef,
+      default   => 'root',
+    },
+  }
 }

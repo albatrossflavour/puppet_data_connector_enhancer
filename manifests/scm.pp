@@ -110,33 +110,14 @@ class puppet_data_connector_enhancer::scm (
   $cis_data = puppet_data_connector_enhancer::parse_csv($csv_path)
 
   # Export a file resource for each node
+  # OS-specific paths and ownership are handled by the client when collecting
   $cis_data.each |$certname, $data| {
-    # Query PuppetDB to determine target node's OS family
-    $node_os = puppetdb_query("inventory[facts.os.family] { certname = '${certname}' }")[0]
-    $os_family = $node_os ? {
-      undef   => 'unknown',
-      default => $node_os['facts.os.family'],
-    }
-
-    # Set OS-appropriate file attributes
-    if $os_family == 'windows' {
-      $file_owner = undef
-      $file_group = undef
-      $file_path = "C:/ProgramData/PuppetLabs/facter/facts.d/cis_score_${certname}.yaml"
-    } else {
-      $file_owner = 'root'
-      $file_group = 'root'
-      $file_path = "/opt/puppetlabs/facter/facts.d/cis_score_${certname}.yaml"
-    }
-
-    # Each node's exported resource uses certname in path to avoid conflicts during export
-    # The collecting node will override the path to the OS-appropriate location
     @@file { "cis_score_fact_${certname}":
       ensure  => file,
-      owner   => $file_owner,
-      group   => $file_group,
+      owner   => 'root',
+      group   => 'root',
       mode    => '0644',
-      path    => $file_path,
+      path    => '/opt/puppetlabs/facter/facts.d/cis_score.yaml',
       content => epp('puppet_data_connector_enhancer/cis_fact.yaml.epp', {
           'scan_timestamp'            => $data['scan_timestamp'],
           'scan_type'                 => $data['scan_type'],
