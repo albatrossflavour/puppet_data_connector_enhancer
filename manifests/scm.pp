@@ -110,14 +110,15 @@ class puppet_data_connector_enhancer::scm (
   $cis_data = puppet_data_connector_enhancer::parse_csv($csv_path)
 
   # Export a file resource for each node
-  # OS-specific paths and ownership are handled by the client when collecting
+  # Each resource has a unique path during export to avoid conflicts
+  # OS-specific paths and ownership are overridden by the client when collecting
   $cis_data.each |$certname, $data| {
     @@file { "cis_score_fact_${certname}":
       ensure  => file,
       owner   => 'root',
       group   => 'root',
       mode    => '0644',
-      path    => '/opt/puppetlabs/facter/facts.d/cis_score.yaml',
+      path    => "/opt/puppetlabs/facter/facts.d/cis_score_${certname}.yaml",
       content => epp('puppet_data_connector_enhancer/cis_fact.yaml.epp', {
           'scan_timestamp'            => $data['scan_timestamp'],
           'scan_type'                 => $data['scan_type'],
