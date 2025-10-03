@@ -20,6 +20,8 @@
 #   #      }
 #   #    }
 #
+require 'csv'
+
 Puppet::Functions.create_function(:'puppet_data_connector_enhancer::parse_csv') do
   dispatch :parse_csv do
     param 'String', :csv_path
@@ -33,35 +35,22 @@ Puppet::Functions.create_function(:'puppet_data_connector_enhancer::parse_csv') 
 
     result = {}
 
-    File.readlines(csv_path).each_with_index do |line, index|
-      # Skip header row
-      next if index.zero?
+    CSV.foreach(csv_path, headers: true, skip_blanks: true) do |row|
+      # Extract fields based on CSV headers:
+      # Scan Timestamp, Scan Type, Node Name, Scanned Benchmark, Scanned Profile,
+      # Adjusted Compliance Score, Exception Score
 
-      # Skip empty lines
-      next if line.strip.empty?
+      # Skip rows with insufficient data
+      next unless row['Node Name'] && row['Scan Timestamp']
 
-      # Parse CSV line (simple split - data doesn't contain commas or quotes)
-      fields = line.strip.split(',')
-
-      # Extract fields based on CSV structure:
-      # 0: Scan Timestamp
-      # 1: Scan Type
-      # 2: Node Name
-      # 3: Scanned Benchmark
-      # 4: Scanned Profile
-      # 5: Adjusted Compliance Score
-      # 6: Exception Score
-
-      next if fields.length < 7
-
-      certname = fields[2].strip.downcase
+      certname = row['Node Name'].strip.downcase
       result[certname] = {
-        'scan_timestamp'            => fields[0].strip,
-        'scan_type'                 => fields[1].strip,
-        'scanned_benchmark'         => fields[3].strip,
-        'scanned_profile'           => fields[4].strip,
-        'adjusted_compliance_score' => fields[5].strip,
-        'exception_score'           => fields[6].strip,
+        'scan_timestamp'            => row['Scan Timestamp'].to_s.strip,
+        'scan_type'                 => row['Scan Type'].to_s.strip,
+        'scanned_benchmark'         => row['Scanned Benchmark'].to_s.strip,
+        'scanned_profile'           => row['Scanned Profile'].to_s.strip,
+        'adjusted_compliance_score' => row['Adjusted Compliance Score'].to_s.strip,
+        'exception_score'           => row['Exception Score'].to_s.strip,
       }
     end
 

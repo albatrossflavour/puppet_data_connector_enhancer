@@ -27,6 +27,9 @@
 # @param scm_timer_interval
 #   The systemd timer interval specification for SCM exports.
 #
+# @param scm_log_file
+#   The path to the SCM export script log file.
+#
 class puppet_data_connector_enhancer::scm (
   Stdlib::Absolutepath $scm_dir,
   Stdlib::HTTPSUrl $scm_host,
@@ -35,21 +38,22 @@ class puppet_data_connector_enhancer::scm (
   Integer[1] $scm_poll_interval,
   Integer[1] $scm_max_wait_time,
   Pattern[/^.+$/] $scm_timer_interval,
+  Stdlib::Absolutepath $scm_log_file,
 ) {
   $csv_path = "${scm_dir}/score_data/Summary_Report_API.csv"
 
   # Create SCM directories
   file { $scm_dir:
     ensure => 'directory',
-    owner  => 'root',
-    group  => 'root',
+    owner  => 'pe-puppet',
+    group  => 'pe-puppet',
     mode   => '0755',
   }
 
   file { "${scm_dir}/score_data":
     ensure  => 'directory',
-    owner   => 'root',
-    group   => 'root',
+    owner   => 'pe-puppet',
+    group   => 'pe-puppet',
     mode    => '0755',
     require => File[$scm_dir],
   }
@@ -57,8 +61,8 @@ class puppet_data_connector_enhancer::scm (
   # Deploy SCM export and download script
   file { "${scm_dir}/export_and_download_cis.rb":
     ensure  => file,
-    owner   => 'root',
-    group   => 'root',
+    owner   => 'pe-puppet',
+    group   => 'pe-puppet',
     mode    => '0700',
     content => epp('puppet_data_connector_enhancer/export_and_download_cis.rb.epp', {
         'scm_host'         => $scm_host,
@@ -67,6 +71,7 @@ class puppet_data_connector_enhancer::scm (
         'poll_interval'    => $scm_poll_interval,
         'max_wait_time'    => $scm_max_wait_time,
         'scm_dir'          => $scm_dir,
+        'scm_log_file'     => $scm_log_file,
     }),
     require => File[$scm_dir],
   }
@@ -91,8 +96,8 @@ class puppet_data_connector_enhancer::scm (
 
       [Service]
       Type=oneshot
-      User=root
-      Group=root
+      User=pe-puppet
+      Group=pe-puppet
       ExecStart=${scm_dir}/export_and_download_cis.rb
       WorkingDirectory=${scm_dir}/score_data
       StandardOutput=journal

@@ -4,6 +4,7 @@
       Integer $poll_interval,
       Integer $max_wait_time,
       String $scm_dir,
+      String $scm_log_file,
 | -%>
 #!/opt/puppetlabs/puppet/bin/ruby
 #
@@ -20,7 +21,7 @@ require 'fileutils'
 require 'logger'
 
 # Set up logging
-log = Logger.new('/var/log/puppetlabs/puppet_data_connector_enhancer_scm.log')
+log = Logger.new('<%=$scm_log_file %>')
 log.level = Logger::INFO
 
 #################################################################################################################################
@@ -50,6 +51,30 @@ def create_export(host, token, log)
   else
     log.error("HTTP Error from create_export: #{response.code} - #{response.body}")
     abort "HTTP Error from <create_export>: #{response.code}"
+  end
+end
+
+#################################################################################################################################
+
+def create_export_with_retry(host, token, log, max_retries: 3)
+  # Create export with exponential backoff retry logic
+  attempt = 0
+  base_delay = 60
+
+  loop do
+    attempt += 1
+    begin
+      return create_export(host, token, log)
+    rescue StandardError => e
+      if attempt >= max_retries
+        log.fatal("Failed to create export after #{max_retries} attempts: #{e.message}")
+        raise
+      end
+
+      delay = base_delay * (2 ** (attempt - 1))
+      log.warn("Export creation attempt #{attempt} failed: #{e.message}. Retrying in #{delay}s...")
+      sleep delay
+    end
   end
 end
 
@@ -128,9 +153,9 @@ def download_export(report, host, token, log)
   response = http.request(request)
 
   if response.code == '200'
-    file = File.new(file_name, 'w')
-    file.puts(response.body)
-    file.close
+    File.open(file_name, 'w', 0600) do |file|
+      file.write(response.body)
+    end
     log.info("Export downloaded successfully to #{file_name}")
   else
     log.error("HTTP Error from download_export: #{response.code}")
@@ -217,6 +242,38 @@ end
 
 #################################################################################################################################
 
+def write_status_file(scm_dir, status_data, log)
+  # Write status file for Prometheus monitoring
+  status_file = "#{scm_dir}/scm_export_status.json"
+
+  begin
+    File.open(status_file, 'w', 0644) do |file|
+      file.write(JSON.pretty_generate(status_data))
+    end
+    log.debug("Wrote status file: #{status_file}")
+  rescue StandardError => e
+    log.error("Failed to write status file: #{e.message}")
+  end
+end
+
+#################################################################################################################################
+
+def count_csv_nodes(csv_path, log)
+  # Count number of nodes in CSV file
+  return 0 unless File.exist?(csv_path)
+
+  lines = File.readlines(csv_path)
+  # Subtract 1 for header row, count non-empty lines
+  node_count = lines.count { |line| !line.strip.empty? } - 1
+  log.debug("Counted #{node_count} nodes in CSV")
+  node_count
+rescue StandardError => e
+  log.warn("Error counting nodes in CSV: #{e.message}")
+  0
+end
+
+#################################################################################################################################
+
 begin
   # Declare variables
   scm_host = '<%=$scm_host %>'
@@ -224,14 +281,17 @@ begin
   current_time = Time.now.utc.getlocal
   scm_dir = '<%=$scm_dir %>'
   score_data_dir = '<%=$scm_dir %>/score_data'
+  csv_path = "#{score_data_dir}/Summary_Report_API.csv"
   poll_interval = <%=$poll_interval %>
   max_wait_time = <%=$max_wait_time %>
   export_retention = <%=$export_retention %>
 
+  start_time = Time.now.to_f
+
   log.info('=== Starting CIS export and download process ===')
 
-  # Create new export
-  new_export = create_export(scm_host, auth, log)
+  # Create new export with retry logic
+  new_export = create_export_with_retry(scm_host, auth, log)
   export_id = new_export['id']
 
   # Poll for completion
@@ -248,8 +308,35 @@ begin
 
   log.info('=== CIS export and download process completed successfully ===')
 
+  # Write success status
+  duration = Time.now.to_f - start_time
+  nodes_exported = count_csv_nodes(csv_path, log)
+
+  write_status_file(scm_dir, {
+    last_run_timestamp: Time.now.to_i,
+    last_success_timestamp: Time.now.to_i,
+    status: 'success',
+    duration_seconds: duration.round(2),
+    export_id: export_id,
+    nodes_exported: nodes_exported,
+    error_message: nil
+  }, log)
+
 rescue StandardError => e
   log.fatal("Fatal error: #{e.class} - #{e.message}")
   log.fatal(e.backtrace.join("\n"))
+
+  # Write failure status
+  duration = Time.now.to_f - start_time
+  write_status_file(scm_dir, {
+    last_run_timestamp: Time.now.to_i,
+    last_success_timestamp: nil,
+    status: 'failed',
+    duration_seconds: duration.round(2),
+    export_id: defined?(export_id) ? export_id : nil,
+    nodes_exported: 0,
+    error_message: "#{e.class}: #{e.message}"
+  }, log)
+
   abort "Fatal error: #{e.message}"
 end

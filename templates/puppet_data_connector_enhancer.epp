@@ -47,6 +47,7 @@ class PrometheusMetricsGenerator
     collect_with_error_handling('trusted_facts') { collect_trusted_facts }
     collect_with_error_handling('patching_info') { collect_patching_info }
     collect_with_error_handling('cis_score') { collect_cis_score }
+    collect_with_error_handling('scm_export_health') { collect_scm_export_health }
     collect_with_error_handling('infrastructure_config') { collect_infrastructure_config }
 
     output_metrics
@@ -587,6 +588,53 @@ class PrometheusMetricsGenerator
     @logger.debug("Collected CIS compliance scores for #{cis_data.length} nodes")
   end
 
+  def collect_scm_export_health
+    # Only collect SCM export metrics if status file exists (SCM collection enabled)
+    status_file = '/opt/puppetlabs/puppet_data_connector_enhancer/scm_export_status.json'
+
+    return unless File.exist?(status_file)
+
+    begin
+      status_json = File.read(status_file)
+      status = JSON.parse(status_json)
+
+      # Export job success/failure (1 = success, 0 = failed)
+      job_success = status['status'] == 'success' ? 1 : 0
+      @data << build_metric('puppet_scm_export_success', {}, job_success)
+
+      # Last run timestamp
+      if status['last_run_timestamp']
+        @data << build_metric('puppet_scm_export_last_run_timestamp', {}, status['last_run_timestamp'])
+      end
+
+      # Last successful run timestamp
+      if status['last_success_timestamp']
+        @data << build_metric('puppet_scm_export_last_success_timestamp', {}, status['last_success_timestamp'])
+      end
+
+      # Export duration in seconds
+      if status['duration_seconds']
+        @data << build_metric('puppet_scm_export_duration_seconds', {}, status['duration_seconds'])
+      end
+
+      # Number of nodes exported
+      if status['nodes_exported']
+        @data << build_metric('puppet_scm_export_nodes_count', {}, status['nodes_exported'])
+      end
+
+      # Export ID (as label on a gauge metric)
+      if status['export_id']
+        @data << build_metric('puppet_scm_export_info', { export_id: status['export_id'].to_s }, 1)
+      end
+
+      @logger.debug("Collected SCM export health metrics: status=#{status['status']}, nodes=#{status['nodes_exported']}")
+    rescue JSON::ParserError => e
+      @logger.warn("Failed to parse SCM export status file: #{e.message}")
+    rescue StandardError => e
+      @logger.warn("Error reading SCM export status: #{e.message}")
+    end
+  end
+
   def output_metrics
     # Add summary statistics
     @data << build_metric('puppet_patching_stats', { type: 'nodes_to_patch' }, @patch_count)
@@ -648,6 +696,32 @@ class PrometheusMetricsGenerator
       # CIS compliance metrics
       'puppet_cis_compliance_score' => {
         help: 'CIS compliance score per node (base and adjusted with exceptions)',
+        type: 'gauge'
+      },
+
+      # SCM export health metrics
+      'puppet_scm_export_success' => {
+        help: 'SCM export job success status (1 = success, 0 = failed)',
+        type: 'gauge'
+      },
+      'puppet_scm_export_last_run_timestamp' => {
+        help: 'Unix timestamp of last SCM export job run',
+        type: 'gauge'
+      },
+      'puppet_scm_export_last_success_timestamp' => {
+        help: 'Unix timestamp of last successful SCM export job',
+        type: 'gauge'
+      },
+      'puppet_scm_export_duration_seconds' => {
+        help: 'Duration of last SCM export job in seconds',
+        type: 'gauge'
+      },
+      'puppet_scm_export_nodes_count' => {
+        help: 'Number of nodes included in the last SCM export',
+        type: 'gauge'
+      },
+      'puppet_scm_export_info' => {
+        help: 'SCM export metadata including export ID',
         type: 'gauge'
       },
 

@@ -70,6 +70,9 @@
 # @param scm_timer_interval
 #   The systemd timer interval specification for SCM exports (e.g., '*:0/30' for every 30 minutes).
 #
+# @param scm_log_file
+#   The path to the SCM export script log file.
+#
 # @example Basic usage with default parameters
 #   include puppet_data_connector_enhancer
 #
@@ -120,6 +123,7 @@ class puppet_data_connector_enhancer (
   Integer[1] $scm_poll_interval                         = 30,
   Integer[1] $scm_max_wait_time                         = 900,
   Pattern[/^.+$/] $scm_timer_interval                   = '*:0/30',
+  Stdlib::Absolutepath $scm_log_file                    = '/var/log/puppetlabs/puppet_data_connector_enhancer_scm.log',
 ) {
 
   $dropzone_file = "${dropzone}/${output_filename}"
@@ -148,6 +152,7 @@ class puppet_data_connector_enhancer (
       scm_poll_interval    => $scm_poll_interval,
       scm_max_wait_time    => $scm_max_wait_time,
       scm_timer_interval   => $scm_timer_interval,
+      scm_log_file         => $scm_log_file,
     }
   }
 
