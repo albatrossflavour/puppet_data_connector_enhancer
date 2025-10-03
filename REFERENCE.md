@@ -6,14 +6,9 @@
 
 ### Classes
 
-#### Public Classes
-
 * [`puppet_data_connector_enhancer`](#puppet_data_connector_enhancer): Manages the Puppet Data Connector Enhancer
 * [`puppet_data_connector_enhancer::client`](#puppet_data_connector_enhancer--client): Collect CIS score data for this node from PuppetDB
-
-#### Private Classes
-
-* `puppet_data_connector_enhancer::scm`: Manage SCM CIS score collection and distribution
+* [`puppet_data_connector_enhancer::scm`](#puppet_data_connector_enhancer--scm): Manage SCM CIS score collection and distribution
 
 ### Functions
 
@@ -293,6 +288,74 @@ The fact will contain:
   - scanned_profile: Profile applied (e.g., "Level 1 - Server")
   - adjusted_compliance_score: Score after exceptions
   - exception_score: Score with exceptions included
+
+### <a name="puppet_data_connector_enhancer--scm"></a>`puppet_data_connector_enhancer::scm`
+
+This private class runs only on the PE server when SCM collection is enabled.
+It manages the SCM export script, systemd timer, parses the CIS summary CSV file,
+and exports a file resource for each node to PuppetDB.
+Nodes then collect their specific resource via the client class.
+
+#### Parameters
+
+The following parameters are available in the `puppet_data_connector_enhancer::scm` class:
+
+* [`scm_dir`](#-puppet_data_connector_enhancer--scm--scm_dir)
+* [`scm_host`](#-puppet_data_connector_enhancer--scm--scm_host)
+* [`scm_auth`](#-puppet_data_connector_enhancer--scm--scm_auth)
+* [`scm_export_retention`](#-puppet_data_connector_enhancer--scm--scm_export_retention)
+* [`scm_poll_interval`](#-puppet_data_connector_enhancer--scm--scm_poll_interval)
+* [`scm_max_wait_time`](#-puppet_data_connector_enhancer--scm--scm_max_wait_time)
+* [`scm_timer_interval`](#-puppet_data_connector_enhancer--scm--scm_timer_interval)
+* [`scm_log_file`](#-puppet_data_connector_enhancer--scm--scm_log_file)
+
+##### <a name="-puppet_data_connector_enhancer--scm--scm_dir"></a>`scm_dir`
+
+Data type: `Stdlib::Absolutepath`
+
+Base directory for storing SCM scripts and CSV data.
+
+##### <a name="-puppet_data_connector_enhancer--scm--scm_host"></a>`scm_host`
+
+Data type: `Stdlib::HTTPSUrl`
+
+The HTTPS URL of the SCM server.
+
+##### <a name="-puppet_data_connector_enhancer--scm--scm_auth"></a>`scm_auth`
+
+Data type: `Sensitive[String[1]]`
+
+The SCM API personal access token for authentication.
+
+##### <a name="-puppet_data_connector_enhancer--scm--scm_export_retention"></a>`scm_export_retention`
+
+Data type: `Integer[1]`
+
+Maximum number of API-generated reports to retain on the SCM host.
+
+##### <a name="-puppet_data_connector_enhancer--scm--scm_poll_interval"></a>`scm_poll_interval`
+
+Data type: `Integer[1]`
+
+Seconds to wait between polling attempts for export completion.
+
+##### <a name="-puppet_data_connector_enhancer--scm--scm_max_wait_time"></a>`scm_max_wait_time`
+
+Data type: `Integer[1]`
+
+Maximum seconds to wait for export completion before timing out.
+
+##### <a name="-puppet_data_connector_enhancer--scm--scm_timer_interval"></a>`scm_timer_interval`
+
+Data type: `Pattern[/^.+$/]`
+
+The systemd timer interval specification for SCM exports.
+
+##### <a name="-puppet_data_connector_enhancer--scm--scm_log_file"></a>`scm_log_file`
+
+Data type: `Stdlib::Absolutepath`
+
+The path to the SCM export script log file.
 
 ## Functions
 

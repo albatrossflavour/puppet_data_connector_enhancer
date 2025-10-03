@@ -1,5 +1,4 @@
 # @summary Manage SCM CIS score collection and distribution
-# @api private
 #
 # This private class runs only on the PE server when SCM collection is enabled.
 # It manages the SCM export script, systemd timer, parses the CIS summary CSV file,
