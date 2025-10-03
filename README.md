@@ -160,7 +160,7 @@ puppet_scm_export_info{export_id="..."}
 
 The module includes pre-built Grafana dashboards for visualising all collected metrics.
 
-![Overview Dashboard](https://raw.githubusercontent.com/albatrossflavour/puppet-puppet_data_connector_enhancer/main/images/overview%20dashboard.png)
+![Overview Dashboard](https://raw.githubusercontent.com/albatrossflavour/puppet_data_connector_enhancer/main/images/overview%20dashboard.png)
 
 **Available dashboards:**
 
@@ -176,7 +176,7 @@ The module includes pre-built Grafana dashboards for visualising all collected m
 | `puppet_restart_overview.json` | Restart requirements |
 | `puppet_cis.json` | CIS compliance scores |
 
-**📸 [View Dashboard Gallery →](https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer/blob/main/DASHBOARDS.md)**
+**📸 [View Dashboard Gallery →](https://github.com/albatrossflavour/puppet_data_connector_enhancer/blob/main/DASHBOARDS.md)**
 
 **Quick start:**
 
