@@ -4,7 +4,6 @@
 [![Puppet Forge - downloads](https://img.shields.io/puppetforge/dt/albatrossflavour/puppet_data_connector_enhancer.svg)](https://forge.puppet.com/modules/albatrossflavour/puppet_data_connector_enhancer)
 [![Puppet Forge - endorsement](https://img.shields.io/puppetforge/e/albatrossflavour/puppet_data_connector_enhancer.svg)](https://forge.puppet.com/modules/albatrossflavour/puppet_data_connector_enhancer)
 [![Puppet Forge - scores](https://img.shields.io/puppetforge/f/albatrossflavour/puppet_data_connector_enhancer.svg)](https://forge.puppet.com/modules/albatrossflavour/puppet_data_connector_enhancer)
-[![Apache-2 License](https://img.shields.io/github/license/albatrossflavour/puppet-puppet_data_connector_enhancer.svg)](LICENSE)
 
 ## Table of Contents
 
@@ -161,7 +160,7 @@ puppet_scm_export_info{export_id="..."}
 
 The module includes pre-built Grafana dashboards for visualising all collected metrics.
 
-![Overview Dashboard](images/overview%20dashboard.png)
+![Overview Dashboard](https://raw.githubusercontent.com/albatrossflavour/puppet-puppet_data_connector_enhancer/main/images/overview%20dashboard.png)
 
 **Available dashboards:**
 
@@ -177,7 +176,7 @@ The module includes pre-built Grafana dashboards for visualising all collected m
 | `puppet_restart_overview.json` | Restart requirements |
 | `puppet_cis.json` | CIS compliance scores |
 
-**📸 [View Dashboard Gallery →](DASHBOARDS.md)**
+**📸 [View Dashboard Gallery →](https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer/blob/main/DASHBOARDS.md)**
 
 **Quick start:**
 
