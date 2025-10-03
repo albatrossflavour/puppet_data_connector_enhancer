@@ -96,10 +96,11 @@ class { 'puppet_data_connector_enhancer':
    - Exports file resources to PuppetDB (one per node)
    - Writes status JSON for Prometheus health monitoring
 
-2. **Client-side** (all nodes):
-   - Collects exported resource from PuppetDB
-   - Writes to `/opt/puppetlabs/facter/facts.d/cis_score.yaml`
-   - Facter loads as structured fact on next run
+2. **Client-side** (all nodes - automatically included):
+   - The `puppet_data_connector_enhancer::client` class is automatically included on all nodes when `enable_scm_collection => true`
+   - Collects exported resource from PuppetDB tagged for this specific node
+   - Writes to `/opt/puppetlabs/facter/facts.d/cis_score.yaml` (or `C:/ProgramData/PuppetLabs/facter/facts.d/cis_score.yaml` on Windows)
+   - Facter loads as structured fact on next Puppet run
 
 3. **Metrics collection**:
    - Main script reads status file and `cis_score` facts
