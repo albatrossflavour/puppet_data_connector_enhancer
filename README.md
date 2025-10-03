@@ -253,8 +253,32 @@ The enhancer collects 17 different metric types:
 Full metric documentation is available in the script's help output:
 
 ```bash
-/usr/local/bin/puppet_data_connector_enhancer.rb --help
+/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer --help
 ```
+
+### Grafana dashboards
+
+This module includes sample Grafana dashboards in the `files/` directory that can be imported into your Grafana instance to visualise the collected metrics:
+
+- **`puppet_dashboards.json`** - Main navigation dashboard with links to all other dashboards
+- **`puppet_status.json`** - Overview of Puppet run status and node health
+- **`puppet_node_detail.json`** - Detailed view of individual node metrics
+- **`puppet_os_overview.json`** - Operating system distribution and version tracking
+- **`puppet_patching_status.json`** - Patch management overview and compliance
+- **`puppet_patching_detail.json`** - Detailed package update information per node
+- **`puppet_patching_blocked.json`** - Nodes with blocked patching operations
+- **`puppet_restart_overview.json`** - System restart requirements tracking
+- **`puppet_cis.json`** - CIS compliance scores and benchmark tracking
+
+**To import dashboards:**
+
+1. Copy the JSON files from the module: `puppet_data_connector_enhancer/files/*.json`
+2. In Grafana, navigate to **Dashboards** → **Import**
+3. Upload the JSON file or paste its contents
+4. Select your Prometheus data source
+5. Click **Import**
+
+The dashboards use the infrastructure server filters (`puppet_server`, `scm_server`, `grafana_server`, `cd4pe_server`) configured in the module for easier navigation in multi-environment setups.
 
 ## Limitations
 
