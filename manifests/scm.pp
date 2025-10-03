@@ -42,20 +42,12 @@ class puppet_data_connector_enhancer::scm (
 ) {
   $csv_path = "${scm_dir}/score_data/Summary_Report_API.csv"
 
-  # Create SCM directories
-  file { $scm_dir:
-    ensure => 'directory',
-    owner  => 'pe-puppet',
-    group  => 'pe-puppet',
-    mode   => '0755',
-  }
-
+  # Create score_data subdirectory (scm_dir is created by init.pp)
   file { "${scm_dir}/score_data":
     ensure  => 'directory',
     owner   => 'pe-puppet',
     group   => 'pe-puppet',
     mode    => '0755',
-    require => File[$scm_dir],
   }
 
   # Deploy SCM export and download script
@@ -73,7 +65,7 @@ class puppet_data_connector_enhancer::scm (
         'scm_dir'          => $scm_dir,
         'scm_log_file'     => $scm_log_file,
     }),
-    require => File[$scm_dir],
+    require => File["${scm_dir}/score_data"],
   }
 
   # Create systemd timer for SCM export
