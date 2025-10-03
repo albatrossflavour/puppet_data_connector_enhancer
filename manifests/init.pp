@@ -111,7 +111,7 @@ class puppet_data_connector_enhancer (
   Enum['DEBUG', 'INFO', 'WARN', 'ERROR'] $log_level     = 'INFO',
   Enum['present', 'absent'] $timer_ensure               = 'present',
   String[1] $timer_interval                             = '*:0/30',
-  Stdlib::Absolutepath $dropzone                        = lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet/prometheus_dropzone'),
+  Stdlib::Absolutepath $dropzone                        = lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet/prometheus_dropzone'), # lint:ignore:lookup_in_parameter
   String[1] $output_filename                            = 'puppet_enhanced_metrics.prom',
   Optional[Stdlib::Fqdn] $puppet_server                 = $facts['puppet_server'],
   Optional[Stdlib::Fqdn] $scm_server                    = undef,
@@ -126,7 +126,6 @@ class puppet_data_connector_enhancer (
   Pattern[/^.+$/] $scm_timer_interval                   = '*:0/30',
   Stdlib::Absolutepath $scm_log_file                    = '/var/log/puppetlabs/puppet_data_connector_enhancer_scm.log',
 ) {
-
   $dropzone_file = "${dropzone}/${output_filename}"
 
   # Set script path - defaults to scm_dir location
@@ -177,16 +176,16 @@ class puppet_data_connector_enhancer (
   file { $_script_path:
     ensure  => $ensure,
     content => epp('puppet_data_connector_enhancer/puppet_data_connector_enhancer.epp', {
-      'http_timeout'   => $http_timeout,
-      'http_retries'   => $http_retries,
-      'retry_delay'    => $retry_delay,
-      'log_level'      => $log_level,
-      'dropzone_file'  => $dropzone_file,
-      'puppet_server'  => pick($puppet_server, ''),
-      'scm_server'     => pick($scm_server, ''),
-      'grafana_server' => pick($grafana_server, ''),
-      'cd4pe_server'   => pick($cd4pe_server, ''),
-      'scm_dir'        => $scm_dir,
+        'http_timeout'   => $http_timeout,
+        'http_retries'   => $http_retries,
+        'retry_delay'    => $retry_delay,
+        'log_level'      => $log_level,
+        'dropzone_file'  => $dropzone_file,
+        'puppet_server'  => pick($puppet_server, ''),
+        'scm_server'     => pick($scm_server, ''),
+        'grafana_server' => pick($grafana_server, ''),
+        'cd4pe_server'   => pick($cd4pe_server, ''),
+        'scm_dir'        => $scm_dir,
     }),
     mode    => '0755',
     owner   => 'pe-puppet',
@@ -198,15 +197,15 @@ class puppet_data_connector_enhancer (
   if $ensure == 'present' and $timer_ensure == 'present' {
     systemd::unit_file { 'puppet-data-connector-enhancer.service':
       content => epp('puppet_data_connector_enhancer/puppet-data-connector-enhancer.service.epp', {
-        'script_path'   => $_script_path,
-        'dropzone_file' => $dropzone_file,
+          'script_path'   => $_script_path,
+          'dropzone_file' => $dropzone_file,
       }),
       require => File[$_script_path],
     }
 
     systemd::unit_file { 'puppet-data-connector-enhancer.timer':
       content => epp('puppet_data_connector_enhancer/puppet-data-connector-enhancer.timer.epp', {
-        'timer_interval' => $timer_interval,
+          'timer_interval' => $timer_interval,
       }),
       require => Systemd::Unit_file['puppet-data-connector-enhancer.service'],
     }

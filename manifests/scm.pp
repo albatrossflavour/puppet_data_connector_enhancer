@@ -44,10 +44,10 @@ class puppet_data_connector_enhancer::scm (
 
   # Create score_data subdirectory (scm_dir is created by init.pp)
   file { "${scm_dir}/score_data":
-    ensure  => 'directory',
-    owner   => 'pe-puppet',
-    group   => 'pe-puppet',
-    mode    => '0755',
+    ensure => 'directory',
+    owner  => 'pe-puppet',
+    group  => 'pe-puppet',
+    mode   => '0755',
   }
 
   # Deploy SCM export and download script
@@ -70,7 +70,7 @@ class puppet_data_connector_enhancer::scm (
 
   # Create systemd timer for SCM export
   systemd::timer { 'puppet-scm-export.timer':
-    timer_content => @("EOT"),
+    timer_content   => @("EOT"),
       [Unit]
       Description=Run Puppet SCM CIS Score Export
 
@@ -80,7 +80,7 @@ class puppet_data_connector_enhancer::scm (
 
       [Install]
       WantedBy=timers.target
-      | EOT
+    | EOT
     service_content => @("EOT"),
       [Unit]
       Description=Puppet SCM CIS Score Export
@@ -97,10 +97,10 @@ class puppet_data_connector_enhancer::scm (
 
       [Install]
       WantedBy=multi-user.target
-      | EOT
-    active  => true,
-    enable  => true,
-    require => File["${scm_dir}/export_and_download_cis"],
+    | EOT
+    active          => true,
+    enable          => true,
+    require         => File["${scm_dir}/export_and_download_cis"],
   }
 
   # Parse the CSV file into a hash of node data

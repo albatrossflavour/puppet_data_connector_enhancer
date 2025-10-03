@@ -159,7 +159,6 @@ describe 'puppet_data_connector_enhancer' do
           it { is_expected.to compile.and_raise_error(%r{parameter 'ensure' expects}) }
         end
 
-
         context 'with invalid http_timeout' do
           let(:params) do
             {
@@ -209,7 +208,6 @@ describe 'puppet_data_connector_enhancer' do
 
           it { is_expected.to compile.and_raise_error(%r{parameter 'script_path' expects}) }
         end
-
       end
 
       context 'resource ordering' do

@@ -34,3 +34,4 @@
 .rerun.json
 bolt-debug.log
 CLAUDE.md
+.cache
