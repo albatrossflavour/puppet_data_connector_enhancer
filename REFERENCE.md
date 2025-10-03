@@ -6,7 +6,18 @@
 
 ### Classes
 
+#### Public Classes
+
 * [`puppet_data_connector_enhancer`](#puppet_data_connector_enhancer): Manages the Puppet Data Connector Enhancer
+
+#### Private Classes
+
+* `puppet_data_connector_enhancer::client`: Collect CIS score data for this node from PuppetDB
+* `puppet_data_connector_enhancer::scm`: Manage SCM CIS score collection and distribution
+
+### Functions
+
+* [`puppet_data_connector_enhancer::parse_csv`](#puppet_data_connector_enhancer--parse_csv)
 
 ## Classes
 
@@ -27,6 +38,16 @@ configuration to avoid configuration duplication.
 include puppet_data_connector_enhancer
 ```
 
+##### Enable SCM CIS score collection
+
+```puppet
+class { 'puppet_data_connector_enhancer':
+  enable_scm_collection => true,
+  scm_server            => 'scm.example.com',
+  scm_auth              => Sensitive(lookup('scm_api_token')),
+}
+```
+
 ##### Custom timeouts and debugging
 
 ```puppet
@@ -44,6 +65,16 @@ class { 'puppet_data_connector_enhancer':
 }
 ```
 
+##### Configure infrastructure servers for Grafana dashboard filters
+
+```puppet
+class { 'puppet_data_connector_enhancer':
+  scm_server     => 'gitlab.example.com',
+  grafana_server => 'grafana.example.com',
+  cd4pe_server   => 'cd4pe.example.com',
+}
+```
+
 #### Parameters
 
 The following parameters are available in the `puppet_data_connector_enhancer` class:
@@ -58,6 +89,18 @@ The following parameters are available in the `puppet_data_connector_enhancer` c
 * [`timer_interval`](#-puppet_data_connector_enhancer--timer_interval)
 * [`dropzone`](#-puppet_data_connector_enhancer--dropzone)
 * [`output_filename`](#-puppet_data_connector_enhancer--output_filename)
+* [`puppet_server`](#-puppet_data_connector_enhancer--puppet_server)
+* [`scm_server`](#-puppet_data_connector_enhancer--scm_server)
+* [`grafana_server`](#-puppet_data_connector_enhancer--grafana_server)
+* [`cd4pe_server`](#-puppet_data_connector_enhancer--cd4pe_server)
+* [`enable_scm_collection`](#-puppet_data_connector_enhancer--enable_scm_collection)
+* [`scm_auth`](#-puppet_data_connector_enhancer--scm_auth)
+* [`scm_dir`](#-puppet_data_connector_enhancer--scm_dir)
+* [`scm_export_retention`](#-puppet_data_connector_enhancer--scm_export_retention)
+* [`scm_poll_interval`](#-puppet_data_connector_enhancer--scm_poll_interval)
+* [`scm_max_wait_time`](#-puppet_data_connector_enhancer--scm_max_wait_time)
+* [`scm_timer_interval`](#-puppet_data_connector_enhancer--scm_timer_interval)
+* [`scm_log_file`](#-puppet_data_connector_enhancer--scm_log_file)
 
 ##### <a name="-puppet_data_connector_enhancer--ensure"></a>`ensure`
 
@@ -69,11 +112,12 @@ Default value: `'present'`
 
 ##### <a name="-puppet_data_connector_enhancer--script_path"></a>`script_path`
 
-Data type: `Stdlib::Absolutepath`
+Data type: `Optional[Stdlib::Absolutepath]`
 
-The full path where the Ruby script will be installed.
+The full path where the main metrics collection script will be installed.
+Defaults to ${scm_dir}/puppet_data_connector_enhancer.
 
-Default value: `'/usr/local/bin/puppet_data_connector_enhancer'`
+Default value: `undef`
 
 ##### <a name="-puppet_data_connector_enhancer--http_timeout"></a>`http_timeout`
 
@@ -138,4 +182,120 @@ Data type: `String[1]`
 The filename for the metrics output (will be placed in the dropzone).
 
 Default value: `'puppet_enhanced_metrics.prom'`
+
+##### <a name="-puppet_data_connector_enhancer--puppet_server"></a>`puppet_server`
+
+Data type: `Optional[Stdlib::Fqdn]`
+
+The Puppet Server hostname (for Grafana dashboard filters).
+
+Default value: `$facts['puppet_server']`
+
+##### <a name="-puppet_data_connector_enhancer--scm_server"></a>`scm_server`
+
+Data type: `Optional[Stdlib::Fqdn]`
+
+The Security Compliance Management (SCM) server hostname. Used for both Grafana dashboard filters and as the SCM API host when enable_scm_collection is true.
+
+Default value: `undef`
+
+##### <a name="-puppet_data_connector_enhancer--grafana_server"></a>`grafana_server`
+
+Data type: `Optional[Stdlib::Fqdn]`
+
+The Grafana server hostname (for Grafana dashboard filters).
+
+Default value: `undef`
+
+##### <a name="-puppet_data_connector_enhancer--cd4pe_server"></a>`cd4pe_server`
+
+Data type: `Optional[Stdlib::Fqdn]`
+
+The Continuous Delivery for PE (CD4PE) server hostname (for Grafana dashboard filters).
+
+Default value: `undef`
+
+##### <a name="-puppet_data_connector_enhancer--enable_scm_collection"></a>`enable_scm_collection`
+
+Data type: `Boolean`
+
+Whether to enable SCM CIS score collection and export functionality.
+
+Default value: `false`
+
+##### <a name="-puppet_data_connector_enhancer--scm_auth"></a>`scm_auth`
+
+Data type: `Optional[Sensitive[String[1]]]`
+
+The SCM API personal access token for authentication. Should not include 'Bearer' prefix (required if enable_scm_collection is true).
+
+Default value: `undef`
+
+##### <a name="-puppet_data_connector_enhancer--scm_dir"></a>`scm_dir`
+
+Data type: `Stdlib::Absolutepath`
+
+Base directory for storing SCM scripts and CSV data. Must be an absolute path.
+
+Default value: `'/opt/puppetlabs/puppet_data_connector_enhancer'`
+
+##### <a name="-puppet_data_connector_enhancer--scm_export_retention"></a>`scm_export_retention`
+
+Data type: `Integer[1]`
+
+Maximum number of API-generated reports to retain on the SCM host. Must be >= 1.
+
+Default value: `8`
+
+##### <a name="-puppet_data_connector_enhancer--scm_poll_interval"></a>`scm_poll_interval`
+
+Data type: `Integer[1]`
+
+Seconds to wait between polling attempts for export completion. Must be >= 1.
+
+Default value: `30`
+
+##### <a name="-puppet_data_connector_enhancer--scm_max_wait_time"></a>`scm_max_wait_time`
+
+Data type: `Integer[1]`
+
+Maximum seconds to wait for export completion before timing out. Must be >= 1.
+
+Default value: `900`
+
+##### <a name="-puppet_data_connector_enhancer--scm_timer_interval"></a>`scm_timer_interval`
+
+Data type: `Pattern[/^.+$/]`
+
+The systemd timer interval specification for SCM exports (e.g., '*:0/30' for every 30 minutes).
+
+Default value: `'*:0/30'`
+
+##### <a name="-puppet_data_connector_enhancer--scm_log_file"></a>`scm_log_file`
+
+Data type: `Stdlib::Absolutepath`
+
+The path to the SCM export script log file.
+
+Default value: `'/var/log/puppetlabs/puppet_data_connector_enhancer_scm.log'`
+
+## Functions
+
+### <a name="puppet_data_connector_enhancer--parse_csv"></a>`puppet_data_connector_enhancer::parse_csv`
+
+Type: Ruby 4.x API
+
+The puppet_data_connector_enhancer::parse_csv function.
+
+#### `puppet_data_connector_enhancer::parse_csv(String $csv_path)`
+
+The puppet_data_connector_enhancer::parse_csv function.
+
+Returns: `Any`
+
+##### `csv_path`
+
+Data type: `String`
+
+
 

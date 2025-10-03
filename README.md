@@ -9,174 +9,76 @@
 ## Table of Contents
 
 1. [Description](#description)
-2. [Setup - The basics of getting started with puppet_data_connector_enhancer](#setup)
-   - [What puppet_data_connector_enhancer affects](#what-puppet_data_connector_enhancer-affects)
-   - [Setup requirements](#setup-requirements)
-   - [Beginning with puppet_data_connector_enhancer](#beginning-with-puppet_data_connector_enhancer)
-3. [Usage - Configuration options and additional functionality](#usage)
+2. [Setup](#setup)
+   - [Requirements](#requirements)
+   - [Installation](#installation)
+3. [Usage](#usage)
    - [Basic usage](#basic-usage)
-   - [Advanced configuration](#advanced-configuration)
-   - [Integration with puppet_data_connector](#integration-with-puppet_data_connector)
+   - [SCM CIS score collection](#scm-cis-score-collection)
+   - [Grafana dashboards](#grafana-dashboards)
 4. [Reference](#reference)
-5. [Limitations - OS compatibility, etc.](#limitations)
-6. [Development - Guide for contributing to the module](#development)
-7. [Support](#support)
+5. [Limitations](#limitations)
+6. [Development](#development)
+7. [Contributors](#contributors)
 
 ## Description
 
-The `puppet_data_connector_enhancer` module extends the functionality of the Puppet Advanced [module](https://forge.puppet.com/modules/puppetlabs/puppet_data_connector/readme) `puppet_data_connector` by deploying and managing jobs that collects comprehensive Puppet infrastructure metrics and delivers them to the data connector dropzone.
+The `puppet_data_connector_enhancer` module extends Puppet's [puppet_data_connector](https://forge.puppet.com/modules/puppetlabs/puppet_data_connector) by collecting comprehensive infrastructure metrics and delivering them to the data connector dropzone for Prometheus consumption.
 
-This module enhances your Puppet monitoring capabilities by providing detailed metrics about:
+**Key features:**
 
-- **Node Management**: Configuration versions, environment distribution, and operating system details
-- **Patch Management**: Available updates, security patches, patch groups, and compliance status
-- **Security Compliance**: CIS benchmark scores and scan timestamps
-- **Infrastructure Assistant**: AI token usage and performance metrics (PE 2023.8+)
-- **Operational Health**: Collection timing, success rates, and error tracking
+- **Enhanced metrics**: Node counts, OS distribution, configuration versions, patch status, and Infrastructure Assistant AI token usage
+- **SCM integration**: Optional CIS compliance score collection and distribution via PuppetDB exported resources
+- **Health monitoring**: Export job status metrics for Alertmanager integration
+- **Grafana dashboards**: Pre-built dashboards for visualising all collected metrics
 
 ## Setup
 
-### What puppet_data_connector_enhancer affects
+### Requirements
 
-This module manages the following components:
-
-- **Ruby script**: Installs `/usr/local/bin/puppet_data_connector_enhancer.rb` (configurable path)
-- **Cron job**: Schedules regular metric collection (default: every 30 minutes)
-- **Metrics files**: Writes Prometheus-format metrics to the data connector dropzone
-- **Network connections**: Makes HTTP/HTTPS requests to PuppetDB and Infrastructure Assistant APIs
-
-The module does **not** affect:
-
-- Existing `puppet_data_connector` configuration
-- PuppetDB or Infrastructure Assistant services
-- System packages or dependencies (uses Ruby standard library only)
-
-### Setup requirements
-
-**Prerequisites:**
-
-- Puppet Enterprise or Puppet Platform (Puppet 7.24+)
-- The premium `puppet_data_connector` module must be installed and configured
-- Access to PuppetDB API (typically port 8080/8081)
-- Access to Infrastructure Assistant API (typically port 8145) - optional
-- Network connectivity from the node running this module to PuppetDB
+- Puppet Enterprise 2021.7+ or Puppet Platform 7.24+
+- [puppet_data_connector](https://forge.puppet.com/modules/puppetlabs/puppet_data_connector) module installed and configured
+- PuppetDB API access (typically port 8080/8081)
+- For SCM integration: Puppet Security Compliance Management v3.x+
 
 **Dependencies:**
-
-This module depends on:
 
 - `puppetlabs/stdlib` (>= 9.0.0 < 10.0.0)
 - `puppet/systemd` (>= 4.0.0 < 8.0.0)
 
-### Beginning with puppet_data_connector_enhancer
+### Installation
 
-The simplest way to get started is to include the class with default parameters:
+Install from the Puppet Forge:
+
+```bash
+puppet module install albatrossflavour-puppet_data_connector_enhancer
+```
+
+Or add to your Puppetfile:
+
+```ruby
+mod 'albatrossflavour-puppet_data_connector_enhancer', :latest
+```
+
+## Usage
+
+### Basic usage
+
+Include the module with default settings:
 
 ```puppet
 include puppet_data_connector_enhancer
 ```
 
 This will:
+- Install the metrics collection script to `/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer`
+- Create a systemd timer running every 30 minutes
+- Automatically discover the dropzone path from your `puppet_data_connector` configuration
+- Connect to PuppetDB on `localhost:8080` using HTTP
 
-1. Install the metrics collection script to `/usr/local/bin/puppet_data_connector_enhancer.rb`
-2. Create a systemd timer running every 30 minutes as the `pe-puppet` user
-3. Automatically discover the dropzone path from your `puppet_data_connector` configuration
-4. Connect to PuppetDB on `localhost:8080` using HTTP
+### SCM CIS score collection
 
-## Usage
-
-### Basic usage
-
-**Default configuration** (recommended for most installations):
-
-```puppet
-include puppet_data_connector_enhancer
-```
-
-**Custom timeouts and debugging**:
-
-```puppet
-class { 'puppet_data_connector_enhancer':
-  http_timeout => 30,
-  log_level    => 'DEBUG',
-}
-```
-
-**Increased collection frequency** (for high-change environments):
-
-```puppet
-class { 'puppet_data_connector_enhancer':
-  timer_interval => '*:0/15',  # Every 15 minutes
-}
-```
-
-### Advanced configuration
-
-**Custom timeouts and retry behavior**:
-
-```puppet
-class { 'puppet_data_connector_enhancer':
-  http_timeout    => 30,
-  http_retries    => 5,
-  retry_delay     => 3.0,
-  log_level       => 'DEBUG',
-}
-```
-
-**Custom installation paths and scheduling**:
-
-```puppet
-class { 'puppet_data_connector_enhancer':
-  script_path      => '/opt/puppet/scripts/enhancer',
-  dropzone         => '/opt/custom/dropzone',
-  output_filename  => 'enhanced_puppet_metrics.prom',
-  timer_interval   => '01,31:00',  # Run at 1 and 31 minutes past each hour
-}
-```
-
-**Disable automatic execution** (manual operation only):
-
-```puppet
-class { 'puppet_data_connector_enhancer':
-  timer_ensure => 'absent',
-}
-```
-
-### Integration with puppet_data_connector
-
-This module is designed to work seamlessly with the premium `puppet_data_connector` module:
-
-```puppet
-# Configure the base data connector
-class { 'puppet_data_connector':
-  dropzone => '/opt/puppetlabs/prometheus',
-  # ... other puppet_data_connector parameters
-}
-
-# Add enhanced metrics collection
-class { 'puppet_data_connector_enhancer':
-  # dropzone automatically discovered from puppet_data_connector
-  puppetdb_host => $facts['puppet_server'],
-}
-```
-
-The enhancer automatically discovers the dropzone path using:
-
-```puppet
-lookup('puppet_data_connector::dropzone', Stdlib::Absolutepath, 'first', '/opt/puppetlabs/puppet/prometheus_dropzone')
-```
-
-### SCM CIS Score Collection (Optional)
-
-The module can optionally integrate with Puppet Security Compliance Management (SCM) to collect and distribute CIS benchmark scores as structured facts to all managed nodes.
-
-**How it works:**
-
-1. **Server-side** (PE server only): Creates exports from SCM API, downloads compliance reports, parses CSV, and exports fact resources to PuppetDB
-2. **Client-side** (all nodes): Collects exported fact resource containing node-specific CIS scores
-3. **Metrics collection**: Main enhancer script reads `cis_score` fact and pushes to Prometheus
-
-**Enable SCM integration:**
+Enable optional CIS compliance score collection from Security Compliance Management:
 
 ```puppet
 class { 'puppet_data_connector_enhancer':
@@ -186,192 +88,165 @@ class { 'puppet_data_connector_enhancer':
 }
 ```
 
-**With custom polling and retention:**
+**How it works:**
 
-```puppet
-class { 'puppet_data_connector_enhancer':
-  enable_scm_collection  => true,
-  scm_server             => 'scm.example.com',
-  scm_auth               => Sensitive(lookup('scm_api_token')),
-  scm_export_retention   => 14,           # Keep 14 days of exports
-  scm_poll_interval      => 45,           # Poll every 45 seconds
-  scm_max_wait_time      => 1200,         # Timeout after 20 minutes
-}
+1. **Server-side** (PE primary server only):
+   - Systemd timer runs `/opt/puppetlabs/puppet_data_connector_enhancer/export_and_download_cis`
+   - Script polls SCM API, downloads CIS summary report, parses CSV
+   - Exports file resources to PuppetDB (one per node)
+   - Writes status JSON for Prometheus health monitoring
+
+2. **Client-side** (all nodes):
+   - Collects exported resource from PuppetDB
+   - Writes to `/opt/puppetlabs/facter/facts.d/cis_score.yaml`
+   - Facter loads as structured fact on next run
+
+3. **Metrics collection**:
+   - Main script reads status file and `cis_score` facts
+   - Generates Prometheus metrics including export health status
+
+**Available SCM parameters:**
+
+| Parameter               | Type                          | Default                                    |
+| ----------------------- | ----------------------------- | ------------------------------------------ |
+| `enable_scm_collection` | Boolean                       | `false`                                    |
+| `scm_server`            | Optional[Stdlib::Fqdn]        | `undef` (required if enabled)              |
+| `scm_auth`              | Optional[Sensitive[String]]   | `undef` (required if enabled)              |
+| `scm_dir`               | Stdlib::Absolutepath          | `/opt/puppetlabs/puppet_data_connector_enhancer` |
+| `scm_export_retention`  | Integer[1]                    | `8`                                        |
+| `scm_poll_interval`     | Integer[1]                    | `30` (seconds)                             |
+| `scm_max_wait_time`     | Integer[1]                    | `900` (seconds)                            |
+| `scm_timer_interval`    | Pattern[/^.+$/]               | `*:0/30` (every 30 minutes)                |
+| `scm_log_file`          | Stdlib::Absolutepath          | `/var/log/puppetlabs/puppet_data_connector_enhancer_scm.log` |
+
+**SCM health metrics for Alertmanager:**
+
+```prometheus
+# Export job status (1 = success, 0 = failed)
+puppet_scm_export_success
+
+# Timestamps for staleness detection
+puppet_scm_export_last_run_timestamp
+puppet_scm_export_last_success_timestamp
+
+# Performance and volume metrics
+puppet_scm_export_duration_seconds
+puppet_scm_export_nodes_count
+
+# Metadata
+puppet_scm_export_info{export_id="..."}
 ```
 
-**The `cis_score` structured fact contains:**
+**Example alert rules:**
 
-- `scan_timestamp`: ISO 8601 timestamp of scan
-- `scan_type`: Type of scan (e.g., "ad hoc")
-- `scanned_benchmark`: CIS benchmark name and version
-- `scanned_profile`: Profile applied (e.g., "Level 1 - Server")
-- `adjusted_compliance_score`: Score after exceptions
-- `exception_score`: Score including exceptions
+```yaml
+# Alert if export hasn't run in 2 hours
+- alert: SCMExportStale
+  expr: time() - puppet_scm_export_last_run_timestamp > 7200
 
-**Requirements for SCM integration:**
-
-- Puppet Security Compliance Management (SCM) v3.x or later
-- SCM personal access token for API authentication
-- CIS benchmarks applied and assessor running on managed nodes
-- `unzip` and `gzip` utilities on PE server
-
-## Reference
-
-This module is documented using Puppet Strings. For detailed parameter information, see the generated [REFERENCE.md](REFERENCE.md) or run:
-
-```bash
-puppet strings generate --format markdown
-```
-
-### Key parameters
-
-| Parameter           | Type                                   | Default                             | Description                              |
-| ------------------- | -------------------------------------- | ----------------------------------- | ---------------------------------------- |
-| `ensure`            | Enum['present', 'absent']              | `'present'`                         | Whether the enhancer should be installed |
-| `puppetdb_host`     | Stdlib::Host                           | `'localhost'`                       | PuppetDB hostname                        |
-| `puppetdb_protocol` | Enum['http', 'https']                  | `'http'`                            | PuppetDB connection protocol             |
-| `dropzone`          | Stdlib::Absolutepath                   | Lookup from `puppet_data_connector` | Directory for metrics files              |
-| `timer_interval`    | String                                 | `'*:0/30'`                          | Systemd timer interval specification     |
-| `service_user`      | String                                 | `'pe-puppet'`                       | User for systemd service                 |
-| `log_level`         | Enum['DEBUG', 'INFO', 'WARN', 'ERROR'] | `'INFO'`                            | Logging verbosity                        |
-
-### Supported metrics
-
-The enhancer collects 17 different metric types:
-
-- `puppet_configuration_version` - Configuration version per node
-- `puppet_node_count` - Node counts by environment
-- `puppet_state_overview` - PuppetDB state statistics
-- `puppet_node_os` - Operating system details per node
-- `puppet_patching_data` - Package update counts and details
-- `puppet_cis_data` - CIS compliance scores
-- `puppet_infra_assistant_tokens_total` - AI token usage metrics
-- And more...
-
-Full metric documentation is available in the script's help output:
-
-```bash
-/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer --help
+# Alert if export is failing
+- alert: SCMExportFailing
+  expr: puppet_scm_export_success == 0
 ```
 
 ### Grafana dashboards
 
-This module includes sample Grafana dashboards in the `files/` directory that can be imported into your Grafana instance to visualise the collected metrics:
+Import pre-built dashboards from the `files/` directory:
 
-- **`puppet_dashboards.json`** - Main navigation dashboard with links to all other dashboards
-- **`puppet_status.json`** - Overview of Puppet run status and node health
-- **`puppet_node_detail.json`** - Detailed view of individual node metrics
-- **`puppet_os_overview.json`** - Operating system distribution and version tracking
-- **`puppet_patching_status.json`** - Patch management overview and compliance
-- **`puppet_patching_detail.json`** - Detailed package update information per node
-- **`puppet_patching_blocked.json`** - Nodes with blocked patching operations
-- **`puppet_restart_overview.json`** - System restart requirements tracking
-- **`puppet_cis.json`** - CIS compliance scores and benchmark tracking
+| Dashboard | Description |
+| --------- | ----------- |
+| `puppet_dashboards.json` | Main navigation dashboard |
+| `puppet_status.json` | Puppet run status and node health |
+| `puppet_node_detail.json` | Detailed node metrics |
+| `puppet_os_overview.json` | OS distribution and versions |
+| `puppet_patching_status.json` | Patch management overview |
+| `puppet_patching_detail.json` | Package update details |
+| `puppet_patching_blocked.json` | Blocked patching operations |
+| `puppet_restart_overview.json` | Restart requirements |
+| `puppet_cis.json` | CIS compliance scores |
 
-**To import dashboards:**
+**Import steps:**
 
-1. Copy the JSON files from the module: `puppet_data_connector_enhancer/files/*.json`
-2. In Grafana, navigate to **Dashboards** → **Import**
-3. Upload the JSON file or paste its contents
-4. Select your Prometheus data source
+1. Copy JSON files from module: `puppet_data_connector_enhancer/files/*.json`
+2. In Grafana: **Dashboards** → **Import**
+3. Upload JSON or paste contents
+4. Select Prometheus data source
 5. Click **Import**
 
-The dashboards use the infrastructure server filters (`puppet_server`, `scm_server`, `grafana_server`, `cd4pe_server`) configured in the module for easier navigation in multi-environment setups.
+Dashboards use infrastructure server filters (`puppet_server`, `scm_server`, `grafana_server`, `cd4pe_server`) for multi-environment navigation.
+
+## Reference
+
+See [REFERENCE.md](REFERENCE.md) for detailed parameter documentation and function references.
+
+**Key parameters:**
+
+| Parameter           | Type                          | Default                         |
+| ------------------- | ----------------------------- | ------------------------------- |
+| `ensure`            | Enum['present', 'absent']     | `'present'`                     |
+| `script_path`       | Optional[Stdlib::Absolutepath] | `${scm_dir}/puppet_data_connector_enhancer` |
+| `timer_interval`    | String[1]                     | `'*:0/30'`                      |
+| `http_timeout`      | Integer[1, 300]               | `5`                             |
+| `log_level`         | Enum['DEBUG', 'INFO', 'WARN', 'ERROR'] | `'INFO'`           |
+| `dropzone`          | Stdlib::Absolutepath          | Discovered from `puppet_data_connector` |
+
+**Collected metrics:**
+
+The module collects 20+ metric types including:
+- `puppet_configuration_version` - Per-node configuration version
+- `puppet_node_count` - Nodes by environment
+- `puppet_state_overview` - PuppetDB statistics
+- `puppet_node_os` - OS details per node
+- `puppet_patching_data` - Available updates
+- `puppet_cis_compliance_score` - CIS scores (base and adjusted)
+- `puppet_scm_export_*` - SCM export health metrics
+- `puppet_infra_assistant_tokens_total` - AI token usage
+- `puppet_exporter_*` - Collection health metrics
 
 ## Limitations
 
-### Operating system support
+**Operating system support:**
 
-This module supports the same operating systems as Puppet Enterprise:
+- Red Hat family: RHEL 7-9, CentOS 7-9, Rocky Linux 8+, AlmaLinux 8+
+- Debian family: Debian 10-12, Ubuntu 18.04-22.04
+- SUSE family: SLES 12-15
 
-- **Red Hat family**: RHEL 7-9, CentOS 7-9, Rocky Linux 8+, AlmaLinux 8+
-- **Debian family**: Debian 10-12, Ubuntu 18.04-22.04
-- **SUSE family**: SLES 12-15
+**Known limitations:**
 
-### Known limitations
-
-- **Puppet Enterprise dependency**: Requires PE-compatible Ruby environment
-- **Network access**: Requires connectivity to PuppetDB and optionally Infrastructure Assistant
-- **Privilege requirements**: Systemd service runs as `pe-puppet` user by default
-- **SSL verification**: Disabled by default for self-signed certificates (common in PE)
-
-### Version compatibility
-
-| Module Version | Puppet Version | PE Version |
-| -------------- | -------------- | ---------- |
-| 1.x            | 7.24+          | 2021.7+    |
-
-### Infrastructure Assistant metrics
-
-Infrastructure Assistant metrics require Puppet Enterprise 2023.8 or later. The module gracefully handles older PE versions by collecting other metrics and logging connection failures.
+- Requires PE-compatible Ruby environment
+- Network access to PuppetDB and Infrastructure Assistant APIs
+- SCM export script requires `unzip` and `gzip` utilities on PE server
+- Infrastructure Assistant metrics require PE 2023.8+
 
 ## Development
 
-### Contributing
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/new-feature`)
-3. Write tests for your changes
-4. Ensure all tests pass (`pdk test unit` and `pdk test acceptance`)
-5. Run static analysis (`pdk validate`)
-6. Submit a pull request
-
-### Testing
-
-This module includes comprehensive test coverage:
+**Testing:**
 
 ```bash
-# Unit tests
-pdk test unit
-
-# Acceptance tests (requires test infrastructure)
-pdk test acceptance
-
-# All tests and validation
-pdk test
+pdk validate       # Syntax and style checks
+pdk test unit      # RSpec unit tests
+pdk build          # Build module package
 ```
 
-### Code standards
+**Code standards:**
 
-This module follows:
-
-- [Puppet Development Kit (PDK)](https://puppet.com/docs/pdk/) standards
+- [Puppet Development Kit (PDK)](https://puppet.com/docs/pdk/)
 - [Puppet code style guide](https://puppet.com/docs/puppet/latest/style_guide.html)
-- [Puppet Strings documentation](https://puppet.com/docs/puppet/latest/puppet_strings.html) format
+- [Puppet Strings documentation](https://puppet.com/docs/puppet/latest/puppet_strings.html)
 
-## Support
+## Contributors
 
-### Community support
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the full list of contributors.
 
-- **GitHub Issues**: [Report bugs and request features](https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer/issues)
-- **Pull Requests**: [Contribute improvements](https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer/pulls)
+**Support:**
 
-### Professional services
-
-For enterprise support, training, and consulting services, please contact the module author.
-
-### Troubleshooting
-
-**Common issues:**
-
-1. **Permission denied errors**: Ensure the `pe-puppet` user has access to the dropzone directory
-2. **Connection refused**: Verify PuppetDB connectivity and firewall settings
-3. **SSL certificate errors**: Expected with self-signed certificates; verification is disabled by default
-4. **Missing metrics**: Check systemd service logs and script output with `--verbose` flag
-
-**Debug mode:**
-
-```bash
-# Run manually with debug logging
-/usr/local/bin/puppet_data_connector_enhancer.rb --verbose --output /tmp/debug_metrics.prom
-
-# Check systemd service logs
-journalctl -u puppet-data-connector-enhancer.service
-journalctl -u puppet-data-connector-enhancer.timer
-```
+- **Issues**: [GitHub Issues](https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer/issues)
+- **Pull Requests**: [GitHub PRs](https://github.com/albatrossflavour/puppet-puppet_data_connector_enhancer/pulls)
 
 ---
 
-Copyright 2024 albatrossflavour
+Copyright 2024 albatrossflavour and contributors
 
 Licensed under the Apache License, Version 2.0
