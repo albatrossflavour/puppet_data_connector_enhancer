@@ -24,7 +24,7 @@
 
 ## Description
 
-The `puppet_data_connector_enhancer` module extends the functionality of Puppet's premium `puppet_data_connector` module by deploying and managing a Ruby script that collects comprehensive Puppet infrastructure metrics and delivers them to the data connector dropzone.
+The `puppet_data_connector_enhancer` module extends the functionality of the Puppet Advanced [module](https://forge.puppet.com/modules/puppetlabs/puppet_data_connector/readme) `puppet_data_connector` by deploying and managing jobs that collects comprehensive Puppet infrastructure metrics and delivers them to the data connector dropzone.
 
 This module enhances your Puppet monitoring capabilities by providing detailed metrics about:
 
@@ -33,8 +33,6 @@ This module enhances your Puppet monitoring capabilities by providing detailed m
 - **Security Compliance**: CIS benchmark scores and scan timestamps
 - **Infrastructure Assistant**: AI token usage and performance metrics (PE 2023.8+)
 - **Operational Health**: Collection timing, success rates, and error tracking
-
-The module automatically discovers the dropzone configuration from your existing `puppet_data_connector` setup, ensuring consistent configuration management without duplication.
 
 ## Setup
 
