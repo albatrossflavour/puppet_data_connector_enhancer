@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.2.0] - 2025-10-03
+
+### Fixed
+
+- Fixed README for Puppet Forge compatibility
+  - Removed broken license badge
+  - Updated dashboard gallery link to full GitHub URL
+  - Updated dashboard image to use raw.githubusercontent.com URL
+
 ## [1.1.0] - 2025-10-03
 
 ### Added
