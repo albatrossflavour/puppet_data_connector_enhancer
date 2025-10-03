@@ -1,6 +1,6 @@
 {
   "name": "albatrossflavour-puppet_data_connector_enhancer",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "albatrossflavour",
   "summary": "Enhances puppet_data_connector with additional Puppet metrics including node, patching, CIS scores, and Infrastructure Assistant data",
   "license": "Apache-2.0",
