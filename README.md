@@ -81,12 +81,20 @@ This will:
 Enable optional CIS compliance score collection from Security Compliance Management:
 
 ```puppet
+# On PE primary server only - configure SCM collection
 class { 'puppet_data_connector_enhancer':
   enable_scm_collection => true,
   scm_server            => 'scm.example.com',
   scm_auth              => Sensitive(lookup('scm_api_token')),
 }
+
+# On all managed nodes - collect CIS score facts
+include puppet_data_connector_enhancer::client
 ```
+
+**Important:**
+- The main `puppet_data_connector_enhancer` class should **only** be applied to the PE primary server
+- The `puppet_data_connector_enhancer::client` class must be declared on **all nodes** you want to collect CIS score facts for
 
 **How it works:**
 
@@ -96,9 +104,8 @@ class { 'puppet_data_connector_enhancer':
    - Exports file resources to PuppetDB (one per node)
    - Writes status JSON for Prometheus health monitoring
 
-2. **Client-side** (all nodes - automatically included):
-   - The `puppet_data_connector_enhancer::client` class is automatically included on all nodes when `enable_scm_collection => true`
-   - Collects exported resource from PuppetDB tagged for this specific node
+2. **Client-side** (all managed nodes):
+   - `puppet_data_connector_enhancer::client` class collects exported resource from PuppetDB tagged for this specific node
    - Writes to `/opt/puppetlabs/facter/facts.d/cis_score.yaml` (or `C:/ProgramData/PuppetLabs/facter/facts.d/cis_score.yaml` on Windows)
    - Facter loads as structured fact on next Puppet run
 

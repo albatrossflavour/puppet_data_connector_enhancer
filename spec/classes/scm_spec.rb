@@ -78,21 +78,16 @@ describe 'puppet_data_connector_enhancer::scm' do
       end
 
       context 'CSV parsing and resource export' do
-        let(:pre_condition) do
-          <<-PUPPET
-          function puppet_data_connector_enhancer::parse_csv($path) {
-            {
-              'node1.example.com' => {
-                'scan_timestamp' => '2025-01-01T00:00:00Z',
-                'scan_type' => 'ad hoc',
-                'scanned_benchmark' => 'CIS Ubuntu 22.04',
-                'scanned_profile' => 'Level 1',
-                'adjusted_compliance_score' => '85',
-                'exception_score' => '82',
-              }
-            }
-          }
-          PUPPET
+        before do
+          # Mock the CSV file on disk
+          csv_content = <<~CSV
+            Node,Scan timestamp,Scan type,Scanned benchmark,Scanned profile,Adjusted compliance score,Exception score
+            node1.example.com,2025-01-01T00:00:00Z,ad hoc,CIS Ubuntu 22.04,Level 1,85,82
+          CSV
+          allow(File).to receive(:exist?).and_call_original
+          allow(File).to receive(:exist?).with('/opt/puppetlabs/puppet_data_connector_enhancer/score_data/cis_scores.csv').and_return(true)
+          allow(File).to receive(:read).and_call_original
+          allow(File).to receive(:read).with('/opt/puppetlabs/puppet_data_connector_enhancer/score_data/cis_scores.csv').and_return(csv_content)
         end
 
         it 'exports file resource for each node' do
