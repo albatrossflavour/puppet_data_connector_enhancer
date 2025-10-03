@@ -1,3 +1,14 @@
+<%- | Integer $http_timeout,
+      Integer $http_retries,
+      Numeric $retry_delay,
+      String $log_level,
+      String $dropzone_file,
+      String $puppet_server,
+      String $scm_server,
+      String $grafana_server,
+      String $cd4pe_server,
+      String $scm_dir,
+| -%>
 #!/opt/puppetlabs/puppet/bin/ruby
 
 require 'json'
@@ -590,13 +601,18 @@ class PrometheusMetricsGenerator
 
   def collect_scm_export_health
     # Only collect SCM export metrics if status file exists (SCM collection enabled)
-    status_file = '/opt/puppetlabs/puppet_data_connector_enhancer/scm_export_status.json'
+    status_file = '<%= $scm_dir %>/scm_export_status.json'
 
-    return unless File.exist?(status_file)
+    unless File.exist?(status_file)
+      @logger.debug("SCM export status file not found: #{status_file}")
+      return
+    end
 
     begin
       status_json = File.read(status_file)
       status = JSON.parse(status_json)
+
+      @logger.debug("SCM export status data: #{status.inspect}")
 
       # Export job success/failure (1 = success, 0 = failed)
       job_success = status['status'] == 'success' ? 1 : 0
@@ -627,7 +643,7 @@ class PrometheusMetricsGenerator
         @data << build_metric('puppet_scm_export_info', { export_id: status['export_id'].to_s }, 1)
       end
 
-      @logger.debug("Collected SCM export health metrics: status=#{status['status']}, nodes=#{status['nodes_exported']}")
+      @logger.info("Collected SCM export health metrics: status=#{status['status']}, nodes=#{status['nodes_exported']}")
     rescue JSON::ParserError => e
       @logger.warn("Failed to parse SCM export status file: #{e.message}")
     rescue StandardError => e

@@ -11,7 +11,8 @@
 #   Whether the data connector enhancer should be present or absent.
 #
 # @param script_path
-#   The full path where the Ruby script will be installed.
+#   The full path where the main metrics collection script will be installed.
+#   Defaults to ${scm_dir}/puppet_data_connector_enhancer.
 #
 # @param http_timeout
 #   HTTP request timeout in seconds.
@@ -103,7 +104,7 @@
 #
 class puppet_data_connector_enhancer (
   Enum['present', 'absent'] $ensure                     = 'present',
-  Stdlib::Absolutepath $script_path                     = '/usr/local/bin/puppet_data_connector_enhancer',
+  Optional[Stdlib::Absolutepath] $script_path           = undef,
   Integer[1, 300] $http_timeout                         = 5,
   Integer[1, 10] $http_retries                          = 3,
   Numeric $retry_delay                                  = 2.0,
@@ -127,6 +128,9 @@ class puppet_data_connector_enhancer (
 ) {
 
   $dropzone_file = "${dropzone}/${output_filename}"
+
+  # Set script path - defaults to scm_dir location
+  $_script_path = pick($script_path, "${scm_dir}/puppet_data_connector_enhancer")
 
   # Validate SCM configuration if enabled
   if $enable_scm_collection {
@@ -161,8 +165,16 @@ class puppet_data_connector_enhancer (
     include puppet_data_connector_enhancer::client
   }
 
-  # Install the Ruby script
-  file { $script_path:
+  # Create scm_dir for scripts
+  file { $scm_dir:
+    ensure => 'directory',
+    owner  => 'pe-puppet',
+    group  => 'pe-puppet',
+    mode   => '0755',
+  }
+
+  # Install the main metrics collection script
+  file { $_script_path:
     ensure  => $ensure,
     content => epp('puppet_data_connector_enhancer/puppet_data_connector_enhancer.epp', {
       'http_timeout'   => $http_timeout,
@@ -174,21 +186,22 @@ class puppet_data_connector_enhancer (
       'scm_server'     => pick($scm_server, ''),
       'grafana_server' => pick($grafana_server, ''),
       'cd4pe_server'   => pick($cd4pe_server, ''),
+      'scm_dir'        => $scm_dir,
     }),
     mode    => '0755',
-    owner   => 'root',
-    group   => 'root',
-    require => Class['puppet_data_connector'],
+    owner   => 'pe-puppet',
+    group   => 'pe-puppet',
+    require => [Class['puppet_data_connector'], File[$scm_dir]],
   }
 
   # Create systemd service and timer for scheduled execution
   if $ensure == 'present' and $timer_ensure == 'present' {
     systemd::unit_file { 'puppet-data-connector-enhancer.service':
       content => epp('puppet_data_connector_enhancer/puppet-data-connector-enhancer.service.epp', {
-        'script_path'   => $script_path,
+        'script_path'   => $_script_path,
         'dropzone_file' => $dropzone_file,
       }),
-      require => File[$script_path],
+      require => File[$_script_path],
     }
 
     systemd::unit_file { 'puppet-data-connector-enhancer.timer':

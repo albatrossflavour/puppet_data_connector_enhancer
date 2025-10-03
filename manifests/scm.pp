@@ -59,7 +59,7 @@ class puppet_data_connector_enhancer::scm (
   }
 
   # Deploy SCM export and download script
-  file { "${scm_dir}/export_and_download_cis.rb":
+  file { "${scm_dir}/export_and_download_cis":
     ensure  => file,
     owner   => 'pe-puppet',
     group   => 'pe-puppet',
@@ -98,7 +98,7 @@ class puppet_data_connector_enhancer::scm (
       Type=oneshot
       User=pe-puppet
       Group=pe-puppet
-      ExecStart=${scm_dir}/export_and_download_cis.rb
+      ExecStart=${scm_dir}/export_and_download_cis
       WorkingDirectory=${scm_dir}/score_data
       StandardOutput=journal
       StandardError=journal
@@ -108,7 +108,7 @@ class puppet_data_connector_enhancer::scm (
       | EOT
     active  => true,
     enable  => true,
-    require => File["${scm_dir}/export_and_download_cis.rb"],
+    require => File["${scm_dir}/export_and_download_cis"],
   }
 
   # Parse the CSV file into a hash of node data
