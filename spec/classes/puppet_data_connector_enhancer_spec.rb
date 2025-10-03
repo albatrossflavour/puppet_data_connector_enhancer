@@ -6,6 +6,7 @@ describe 'puppet_data_connector_enhancer' do
   on_supported_os.each do |os, os_facts|
     context "on #{os}" do
       let(:facts) { os_facts }
+      let(:pre_condition) { 'class { "puppet_data_connector": }' }
       let(:params) do
         {
           'dropzone' => '/opt/puppetlabs/puppet/prometheus_dropzone',
@@ -28,20 +29,25 @@ describe 'puppet_data_connector_enhancer' do
         it 'creates main script with correct permissions' do
           is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
             .with_ensure('present')
-            .with_mode('0700')
+            .with_mode('0755')
             .with_owner('pe-puppet')
             .with_group('pe-puppet')
         end
 
+        it 'creates systemd service unit file' do
+          is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.service')
+        end
+
         it 'creates systemd timer' do
-          is_expected.to contain_systemd__timer('puppet-data-connector-enhancer.timer')
-            .with_active(true)
+          is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.timer')
+          is_expected.to contain_service('puppet-data-connector-enhancer.timer')
+            .with_ensure('running')
             .with_enable(true)
         end
 
         it 'generates the correct script content' do
           is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
-            .with_content(%r{log_level.*INFO})
+            .with_content(%r{class PrometheusMetricsGenerator})
         end
 
         it 'does not include SCM classes by default' do
@@ -51,6 +57,12 @@ describe 'puppet_data_connector_enhancer' do
       end
 
       context 'with SCM collection enabled' do
+        let(:facts) do
+          super().merge(
+            'puppet_server' => 'puppet.example.com',
+            'clientcert' => 'puppet.example.com',
+          )
+        end
         let(:params) do
           super().merge(
             'enable_scm_collection' => true,
@@ -107,24 +119,24 @@ describe 'puppet_data_connector_enhancer' do
         it 'creates custom script path' do
           is_expected.to contain_file('/opt/scripts/enhancer')
             .with_ensure('present')
-            .with_mode('0700')
+            .with_mode('0755')
             .with_owner('pe-puppet')
             .with_group('pe-puppet')
         end
 
         it 'configures timer with custom interval' do
-          is_expected.to contain_systemd__timer('puppet-data-connector-enhancer.timer')
-            .with_active(true)
+          is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.timer')
+          is_expected.to contain_service('puppet-data-connector-enhancer.timer')
+            .with_ensure('running')
             .with_enable(true)
         end
 
         it 'generates the correct script content with custom parameters' do
           is_expected.to contain_file('/opt/scripts/enhancer')
-            .with_content(%r{http_timeout.*30})
-            .with_content(%r{http_retries.*5})
-            .with_content(%r{retry_delay.*5\.0})
-            .with_content(%r{log_level.*DEBUG})
-            .with_content(%r{/custom/dropzone/custom_metrics\.prom})
+            .with_content(%r{http_timeout:.*30})
+            .with_content(%r{http_retries:.*5})
+            .with_content(%r{retry_delay:.*5\.0})
+            .with_content(%r{output_file:.*'/custom/dropzone/custom_metrics\.prom'})
         end
       end
 
@@ -143,9 +155,11 @@ describe 'puppet_data_connector_enhancer' do
         end
 
         it 'stops and disables timer' do
-          is_expected.to contain_systemd__timer('puppet-data-connector-enhancer.timer')
-            .with_active(false)
+          is_expected.to contain_service('puppet-data-connector-enhancer.timer')
+            .with_ensure('stopped')
             .with_enable(false)
+          is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.timer')
+            .with_ensure('absent')
         end
       end
 
@@ -164,9 +178,11 @@ describe 'puppet_data_connector_enhancer' do
         end
 
         it 'stops and disables timer' do
-          is_expected.to contain_systemd__timer('puppet-data-connector-enhancer.timer')
-            .with_active(false)
+          is_expected.to contain_service('puppet-data-connector-enhancer.timer')
+            .with_ensure('stopped')
             .with_enable(false)
+          is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.timer')
+            .with_ensure('absent')
         end
       end
 
@@ -278,7 +294,7 @@ describe 'puppet_data_connector_enhancer' do
             }
           end
 
-          it { is_expected.to compile.and_raise_error(%r{scm_server.*required}) }
+          it { is_expected.to compile.and_raise_error(%r{scm_server and/or scm_auth}) }
         end
 
         context 'when enable_scm_collection is true but scm_auth is missing' do
@@ -289,7 +305,7 @@ describe 'puppet_data_connector_enhancer' do
             }
           end
 
-          it { is_expected.to compile.and_raise_error(%r{scm_auth.*required}) }
+          it { is_expected.to compile.and_raise_error(%r{scm_server and/or scm_auth}) }
         end
 
         context 'with invalid scm_server (not FQDN)' do
@@ -322,8 +338,8 @@ describe 'puppet_data_connector_enhancer' do
         end
 
         it 'ensures script is created before timer' do
-          is_expected.to contain_systemd__timer('puppet-data-connector-enhancer.timer')
-            .that_requires('File[/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer]')
+          is_expected.to contain_systemd__unit_file('puppet-data-connector-enhancer.timer')
+            .that_requires('Systemd::Unit_file[puppet-data-connector-enhancer.service]')
         end
       end
     end

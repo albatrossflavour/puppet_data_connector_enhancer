@@ -17,7 +17,3 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 - Suggesting enhancements
 - Submitting pull requests
 - Code style and standards
-
-## Acknowledgements
-
-Special thanks to the Puppet community and all users who have provided feedback and bug reports.
