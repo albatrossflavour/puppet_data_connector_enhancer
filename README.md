@@ -151,7 +151,11 @@ puppet_scm_export_info{export_id="..."}
 
 ### Grafana dashboards
 
-Import pre-built dashboards from the `files/` directory:
+The module includes pre-built Grafana dashboards for visualising all collected metrics.
+
+![Overview Dashboard](images/overview%20dashboard.png)
+
+**Available dashboards:**
 
 | Dashboard | Description |
 | --------- | ----------- |
@@ -165,15 +169,17 @@ Import pre-built dashboards from the `files/` directory:
 | `puppet_restart_overview.json` | Restart requirements |
 | `puppet_cis.json` | CIS compliance scores |
 
-**Import steps:**
+**📸 [View Dashboard Gallery →](DASHBOARDS.md)**
 
-1. Copy JSON files from module: `puppet_data_connector_enhancer/files/*.json`
+**Quick start:**
+
+1. Copy JSON files from: `puppet_data_connector_enhancer/files/*.json`
 2. In Grafana: **Dashboards** → **Import**
-3. Upload JSON or paste contents
+3. Upload JSON file or paste contents
 4. Select Prometheus data source
 5. Click **Import**
 
-Dashboards use infrastructure server filters (`puppet_server`, `scm_server`, `grafana_server`, `cd4pe_server`) for multi-environment navigation.
+All dashboards support infrastructure server filters for multi-environment deployments.
 
 ## Reference
 
@@ -247,6 +253,6 @@ See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the full list of contributors.
 
 ---
 
-Copyright 2024 albatrossflavour and contributors
+Copyright 2025 albatrossflavour and contributors
 
 Licensed under the Apache License, Version 2.0

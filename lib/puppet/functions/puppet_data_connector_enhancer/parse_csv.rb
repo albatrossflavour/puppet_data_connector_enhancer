@@ -1,13 +1,12 @@
-# Parse CIS score CSV file into hash of node data
+require 'csv'
+
+# Parse CIS score CSV file into hash of node data.
 #
 # This function runs on the Puppet master during catalog compilation to parse
 # the CIS summary CSV file downloaded from SCM. It returns a hash keyed by
 # certname (lowercased) containing each node's CIS score data.
 #
-# @param csv_path [String] Absolute path to the CSV file on the master
-# @return [Hash] Hash of certname => score data, or empty hash on error
-#
-# @example
+# @example Parse CSV file
 #   $scores = puppet_data_connector_enhancer::parse_csv('/opt/puppetlabs/puppet_data_connector_enhancer/score_data/Summary_Report_API.csv')
 #   # => {
 #   #      'node1.example.com' => {
@@ -19,10 +18,9 @@
 #   #        'exception_score' => '84'
 #   #      }
 #   #    }
-#
-require 'csv'
-
 Puppet::Functions.create_function(:'puppet_data_connector_enhancer::parse_csv') do
+  # @param csv_path Absolute path to the CSV file on the master
+  # @return Hash of certname => score data, or empty hash if file doesn't exist
   dispatch :parse_csv do
     param 'String', :csv_path
   end
