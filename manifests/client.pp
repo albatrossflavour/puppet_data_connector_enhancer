@@ -1,5 +1,4 @@
 # @summary Collect CIS score data for this node from PuppetDB
-# @api private
 #
 # This private class runs on all managed nodes when SCM collection is enabled.
 # It collects the exported file resource containing this node's CIS score data from PuppetDB.

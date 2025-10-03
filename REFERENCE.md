@@ -9,10 +9,10 @@
 #### Public Classes
 
 * [`puppet_data_connector_enhancer`](#puppet_data_connector_enhancer): Manages the Puppet Data Connector Enhancer
+* [`puppet_data_connector_enhancer::client`](#puppet_data_connector_enhancer--client): Collect CIS score data for this node from PuppetDB
 
 #### Private Classes
 
-* `puppet_data_connector_enhancer::client`: Collect CIS score data for this node from PuppetDB
 * `puppet_data_connector_enhancer::scm`: Manage SCM CIS score collection and distribution
 
 ### Functions
@@ -278,6 +278,21 @@ Data type: `Stdlib::Absolutepath`
 The path to the SCM export script log file.
 
 Default value: `'/var/log/puppetlabs/puppet_data_connector_enhancer_scm.log'`
+
+### <a name="puppet_data_connector_enhancer--client"></a>`puppet_data_connector_enhancer::client`
+
+This private class runs on all managed nodes when SCM collection is enabled.
+It collects the exported file resource containing this node's CIS score data from PuppetDB.
+The resource is written to the OS-appropriate external facts directory where Facter
+automatically loads it as the 'cis_score' structured fact on the next Puppet run.
+
+The fact will contain:
+  - scan_timestamp: ISO 8601 timestamp of the scan
+  - scan_type: Type of scan (e.g., "ad hoc")
+  - scanned_benchmark: CIS benchmark name and version
+  - scanned_profile: Profile applied (e.g., "Level 1 - Server")
+  - adjusted_compliance_score: Score after exceptions
+  - exception_score: Score with exceptions included
 
 ## Functions
 
