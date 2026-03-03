@@ -331,6 +331,82 @@ describe 'puppet_data_connector_enhancer' do
         end
       end
 
+      context 'with orchestrator metrics enabled' do
+        let(:params) do
+          super().merge(
+            'enable_orchestrator_metrics' => true,
+            'orchestrator_jobs_limit' => 100,
+          )
+        end
+
+        it { is_expected.to compile.with_all_deps }
+
+        it 'includes orchestrator job collector in script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{collect_orchestrator_jobs})
+        end
+
+        it 'includes orchestrator plan collector in script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{collect_orchestrator_plans})
+        end
+
+        it 'includes orchestrator config in script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{enable_orchestrator_metrics:.*true})
+            .with_content(%r{orchestrator_jobs_limit:.*100})
+        end
+
+        it 'includes fetch_json_from_orchestrator method' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{def fetch_json_from_orchestrator})
+        end
+      end
+
+      context 'with orchestrator metrics disabled (default)' do
+        it 'does not call orchestrator collectors' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{enable_orchestrator_metrics:.*false})
+        end
+      end
+
+      context 'with custom orchestrator_jobs_limit' do
+        let(:params) do
+          super().merge(
+            'orchestrator_jobs_limit' => 25,
+          )
+        end
+
+        it { is_expected.to compile.with_all_deps }
+
+        it 'passes custom limit to template' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{orchestrator_jobs_limit:.*25})
+        end
+      end
+
+      context 'orchestrator parameter validation' do
+        context 'with orchestrator_jobs_limit too high' do
+          let(:params) do
+            super().merge(
+              'orchestrator_jobs_limit' => 201,
+            )
+          end
+
+          it { is_expected.to compile.and_raise_error(%r{parameter 'orchestrator_jobs_limit' expects}) }
+        end
+
+        context 'with orchestrator_jobs_limit too low' do
+          let(:params) do
+            super().merge(
+              'orchestrator_jobs_limit' => 0,
+            )
+          end
+
+          it { is_expected.to compile.and_raise_error(%r{parameter 'orchestrator_jobs_limit' expects}) }
+        end
+      end
+
       context 'resource ordering' do
         it 'ensures base directory is created before script' do
           is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')

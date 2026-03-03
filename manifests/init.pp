@@ -74,6 +74,13 @@
 # @param scm_log_file
 #   The path to the SCM export script log file.
 #
+# @param enable_orchestrator_metrics
+#   Whether to enable collection of PE Orchestrator task and plan metrics.
+#   Requires client certificate access to the Orchestrator API on port 8143.
+#
+# @param orchestrator_jobs_limit
+#   Maximum number of recent orchestrator jobs and plans to fetch per collection.
+#
 # @example Basic usage with default parameters
 #   include puppet_data_connector_enhancer
 #
@@ -93,6 +100,12 @@
 # @example Run every 15 minutes instead of default 30
 #   class { 'puppet_data_connector_enhancer':
 #     timer_interval => '*:0/15',
+#   }
+#
+# @example Enable PE Orchestrator task and plan metrics
+#   class { 'puppet_data_connector_enhancer':
+#     enable_orchestrator_metrics => true,
+#     orchestrator_jobs_limit     => 100,
 #   }
 #
 # @example Configure infrastructure servers for Grafana dashboard filters
@@ -125,6 +138,8 @@ class puppet_data_connector_enhancer (
   Integer[1] $scm_max_wait_time                         = 900,
   Pattern[/^.+$/] $scm_timer_interval                   = '*:0/30',
   Stdlib::Absolutepath $scm_log_file                    = '/var/log/puppetlabs/puppet_data_connector_enhancer_scm.log',
+  Boolean $enable_orchestrator_metrics                  = false,
+  Integer[1, 200] $orchestrator_jobs_limit              = 50,
 ) {
   $dropzone_file = "${dropzone}/${output_filename}"
 
@@ -185,7 +200,9 @@ class puppet_data_connector_enhancer (
         'scm_server'     => pick_default($scm_server, ''),
         'grafana_server' => pick_default($grafana_server, ''),
         'cd4pe_server'   => pick_default($cd4pe_server, ''),
-        'scm_dir'        => $scm_dir,
+        'scm_dir'                    => $scm_dir,
+        'enable_orchestrator_metrics' => $enable_orchestrator_metrics,
+        'orchestrator_jobs_limit'     => $orchestrator_jobs_limit,
     }),
     mode    => '0755',
     owner   => 'pe-puppet',

@@ -8,6 +8,8 @@
       String $grafana_server,
       String $cd4pe_server,
       String $scm_dir,
+      Boolean $enable_orchestrator_metrics,
+      Integer $orchestrator_jobs_limit,
 | -%>
 #!/opt/puppetlabs/puppet/bin/ruby
 
@@ -61,6 +63,11 @@ class PrometheusMetricsGenerator
     collect_with_error_handling('scm_export_health') { collect_scm_export_health }
     collect_with_error_handling('infrastructure_config') { collect_infrastructure_config }
 
+    if @config[:enable_orchestrator_metrics]
+      collect_with_error_handling('orchestrator_jobs') { collect_orchestrator_jobs }
+      collect_with_error_handling('orchestrator_plans') { collect_orchestrator_plans }
+    end
+
     output_metrics
   end
 
@@ -86,7 +93,15 @@ class PrometheusMetricsGenerator
       puppet_server: '<%= $puppet_server %>',
       scm_server: '<%= $scm_server %>',
       grafana_server: '<%= $grafana_server %>',
-      cd4pe_server: '<%= $cd4pe_server %>'
+      cd4pe_server: '<%= $cd4pe_server %>',
+      enable_orchestrator_metrics: ENV['ENABLE_ORCHESTRATOR_METRICS'] == 'true' || <%= $enable_orchestrator_metrics %>,
+      orchestrator_host: ENV['ORCHESTRATOR_HOST'] || '<%= $puppet_server %>',
+      orchestrator_port: ENV['ORCHESTRATOR_PORT']&.to_i || 8143,
+      orchestrator_protocol: ENV['ORCHESTRATOR_PROTOCOL'] || 'https',
+      orchestrator_jobs_limit: ENV['ORCHESTRATOR_JOBS_LIMIT']&.to_i || <%= $orchestrator_jobs_limit %>,
+      ssl_cert_file: ENV['SSL_CERT_FILE'] || '/etc/puppetlabs/puppet/ssl/certs/<%= $puppet_server %>.pem',
+      ssl_key_file: ENV['SSL_KEY_FILE'] || '/etc/puppetlabs/puppet/ssl/private_keys/<%= $puppet_server %>.pem',
+      ssl_ca_file: ENV['SSL_CA_FILE'] || '/etc/puppetlabs/puppet/ssl/certs/ca.pem'
     }
   end
 
@@ -97,6 +112,10 @@ class PrometheusMetricsGenerator
 
   def infra_assistant_base_url
     "#{@config[:infra_assistant_protocol]}://#{@config[:infra_assistant_host]}:#{@config[:infra_assistant_port]}"
+  end
+
+  def orchestrator_base_url
+    "#{@config[:orchestrator_protocol]}://#{@config[:orchestrator_host]}:#{@config[:orchestrator_port]}"
   end
 
   # Metric formatting and sanitization methods
@@ -229,6 +248,81 @@ class PrometheusMetricsGenerator
       retry
     else
       @logger.error("Request failed after all retries: #{e.message}")
+      raise e
+    end
+  end
+
+  # HTTP client for Orchestrator API with client certificate authentication
+  def fetch_json_from_orchestrator(uri_str, params = {})
+    uri = URI(uri_str)
+    uri.query = URI.encode_www_form(params) unless params.empty?
+
+    retries = @config[:http_retries] || 3
+    retry_delay = @config[:retry_delay] || 2
+
+    begin
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.open_timeout = @config[:http_timeout]
+      http.read_timeout = @config[:http_timeout]
+      http.use_ssl = true
+      http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+      http.cert = OpenSSL::X509::Certificate.new(File.read(@config[:ssl_cert_file]))
+      http.key = OpenSSL::PKey::RSA.new(File.read(@config[:ssl_key_file]))
+      http.ca_file = @config[:ssl_ca_file]
+
+      request = Net::HTTP::Get.new(uri.request_uri)
+      request['User-Agent'] = 'puppet-data-connector-enhancer/1.0'
+
+      @logger.debug("Making orchestrator request to: #{uri}")
+      response = http.request(request)
+
+      if response.is_a?(Net::HTTPSuccess)
+        begin
+          parsed_data = JSON.parse(response.body)
+          @logger.debug("Successfully parsed orchestrator response from #{uri.path}")
+          return parsed_data
+        rescue JSON::ParserError => e
+          error_msg = "Invalid JSON response from #{uri}: #{e.message}"
+          @logger.error(error_msg)
+          record_collection_error(error_msg, uri.to_s, response.code)
+          raise MetricsCollectionError.new(error_msg, uri.to_s, response.code)
+        end
+      else
+        error_msg = "HTTP #{response.code}: #{response.message}"
+        @logger.error("Orchestrator request failed: #{error_msg} for #{uri}")
+        @logger.debug("Response body: #{response.body[0..500]}") if response.body
+        record_collection_error(error_msg, uri.to_s, response.code)
+        raise MetricsCollectionError.new(error_msg, uri.to_s, response.code)
+      end
+
+    rescue Net::TimeoutError, Net::OpenTimeout, Net::ReadTimeout => e
+      error_msg = "Timeout during orchestrator request to #{uri}: #{e.message}"
+      @logger.error(error_msg)
+      record_collection_error(error_msg, uri.to_s)
+      raise MetricsCollectionError.new(error_msg, uri.to_s)
+
+    rescue Errno::ECONNREFUSED => e
+      error_msg = "Connection refused to #{uri.host}:#{uri.port}"
+      @logger.error(error_msg)
+      record_collection_error(error_msg, uri.to_s)
+      raise MetricsCollectionError.new(error_msg, uri.to_s)
+
+    rescue StandardError => e
+      error_msg = "Unexpected error: #{e.class.name}: #{e.message}"
+      @logger.error("#{error_msg} for #{uri}")
+      record_collection_error(error_msg, uri.to_s)
+      raise MetricsCollectionError.new(error_msg, uri.to_s)
+    end
+
+  rescue MetricsCollectionError => e
+    retries -= 1
+    if retries > 0
+      @logger.warn("Orchestrator request failed, retrying in #{retry_delay}s (#{retries} attempts left): #{e.message}")
+      sleep(retry_delay)
+      retry_delay *= 1.5
+      retry
+    else
+      @logger.error("Orchestrator request failed after all retries: #{e.message}")
       raise e
     end
   end
@@ -599,6 +693,132 @@ class PrometheusMetricsGenerator
     @logger.debug("Collected CIS compliance scores for #{cis_data.length} nodes")
   end
 
+  def collect_orchestrator_jobs
+    limit = @config[:orchestrator_jobs_limit]
+    uri = "#{orchestrator_base_url}/orchestrator/v1/jobs"
+    data = fetch_json_from_orchestrator(uri, { 'limit' => limit, 'order' => 'desc' })
+
+    items = data['items'] || []
+    state_counts = Hash.new(0)
+
+    items.each do |job|
+      job_id = job['name'].to_s
+      task_name = job.dig('options', 'task') || job['command'] || 'unknown'
+      environment = job.dig('environment', 'name') || 'unknown'
+      owner = job.dig('owner', 'login') || 'unknown'
+      state = job['state'] || 'unknown'
+      duration = job['duration']
+      node_count = job['node_count']
+      created_timestamp = job['created_timestamp']
+
+      state_counts[state] += 1
+
+      # Info metric (presence, value=1)
+      add_metric('puppet_orchestrator_job_info', {
+        job_id: job_id,
+        task_name: task_name,
+        command: job['command'] || 'unknown',
+        environment: environment,
+        owner: owner,
+        state: state
+      }, 1)
+
+      # Duration (only for completed jobs with a final duration)
+      if duration && duration.is_a?(Numeric) && duration > 0
+        add_metric('puppet_orchestrator_job_duration_seconds', {
+          job_id: job_id,
+          task_name: task_name
+        }, duration.round(3))
+      end
+
+      # Start timestamp
+      if created_timestamp
+        begin
+          ts = Time.parse(created_timestamp).to_i
+          add_metric('puppet_orchestrator_job_start_timestamp', {
+            job_id: job_id,
+            task_name: task_name
+          }, ts)
+        rescue ArgumentError
+          @logger.warn("Invalid timestamp for job #{job_id}: #{created_timestamp}")
+        end
+      end
+
+      # Node count
+      if node_count && node_count.is_a?(Numeric)
+        add_metric('puppet_orchestrator_job_node_count', {
+          job_id: job_id,
+          task_name: task_name
+        }, node_count)
+      end
+    end
+
+    # Aggregate status totals
+    state_counts.each do |state, count|
+      add_metric('puppet_orchestrator_job_status_total', { state: state }, count)
+    end
+
+    @logger.info("Collected orchestrator job metrics for #{items.length} jobs")
+  end
+
+  def collect_orchestrator_plans
+    limit = @config[:orchestrator_jobs_limit]
+    uri = "#{orchestrator_base_url}/orchestrator/v1/plan_jobs"
+    data = fetch_json_from_orchestrator(uri, { 'limit' => limit, 'order' => 'desc' })
+
+    items = data['items'] || []
+    state_counts = Hash.new(0)
+
+    items.each do |plan|
+      job_id = plan['name'].to_s
+      plan_name = plan.dig('options', 'plan_name') || 'unknown'
+      environment = plan['environment'] || 'unknown'
+      owner = plan.dig('owner', 'login') || 'unknown'
+      state = plan['state'] || 'unknown'
+      duration = plan['duration']
+      created_timestamp = plan['created_timestamp']
+
+      state_counts[state] += 1
+
+      # Info metric (presence, value=1)
+      add_metric('puppet_orchestrator_plan_info', {
+        job_id: job_id,
+        plan_name: plan_name,
+        environment: environment,
+        owner: owner,
+        state: state
+      }, 1)
+
+      # Duration (only for completed plans with a final duration)
+      if duration && duration.is_a?(Numeric) && duration > 0
+        add_metric('puppet_orchestrator_plan_duration_seconds', {
+          job_id: job_id,
+          plan_name: plan_name
+        }, duration.round(3))
+      end
+
+      # Start timestamp
+      if created_timestamp
+        begin
+          ts = Time.parse(created_timestamp).to_i
+          add_metric('puppet_orchestrator_plan_start_timestamp', {
+            job_id: job_id,
+            plan_name: plan_name
+          }, ts)
+        rescue ArgumentError
+          @logger.warn("Invalid timestamp for plan #{job_id}: #{created_timestamp}")
+        end
+      end
+    end
+
+    # Aggregate status totals
+    state_counts.each do |state, count|
+      add_metric('puppet_orchestrator_plan_status_total', { state: state }, count)
+    end
+
+    @logger.info("Collected orchestrator plan metrics for #{items.length} plans")
+  end
+
   def collect_scm_export_health
     # Only collect SCM export metrics if status file exists (SCM collection enabled)
     status_file = '<%= $scm_dir %>/scm_export_status.json'
@@ -787,6 +1007,51 @@ class PrometheusMetricsGenerator
         type: 'gauge'
       },
 
+    }
+
+    # Orchestrator metrics (conditional on feature flag)
+    if @config[:enable_orchestrator_metrics]
+      header_metrics.merge!({
+        'puppet_orchestrator_job_info' => {
+          help: 'PE Orchestrator job presence metric with metadata labels',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_job_duration_seconds' => {
+          help: 'Duration of completed PE Orchestrator jobs in seconds',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_job_start_timestamp' => {
+          help: 'Unix timestamp when the PE Orchestrator job started',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_job_node_count' => {
+          help: 'Number of nodes targeted by each PE Orchestrator job',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_job_status_total' => {
+          help: 'Aggregate count of PE Orchestrator jobs by state',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_plan_info' => {
+          help: 'PE Orchestrator plan run presence metric with metadata labels',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_plan_duration_seconds' => {
+          help: 'Duration of completed PE Orchestrator plan runs in seconds',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_plan_start_timestamp' => {
+          help: 'Unix timestamp when the PE Orchestrator plan run started',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_plan_status_total' => {
+          help: 'Aggregate count of PE Orchestrator plan runs by state',
+          type: 'gauge'
+        }
+      })
+    end
+
+    header_metrics.merge!({
       # Exporter health metrics
       'puppet_exporter_collection_failed' => {
         help: 'Failed data collection attempts by collection type and error',
@@ -804,7 +1069,7 @@ class PrometheusMetricsGenerator
         help: 'Timestamp of the last metrics collection attempt',
         type: 'gauge'
       }
-    }
+    })
 
     header_metrics.each do |name, info|
       header_lines << "# HELP #{name} #{info[:help]}"

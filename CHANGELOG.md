@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **PE Orchestrator Task and Plan Metrics**: Optional collection of metrics from the PE Orchestrator API
+  - `puppet_orchestrator_job_info` - Presence metric per recent orchestrator job with metadata labels
+  - `puppet_orchestrator_job_duration_seconds` - Duration of completed jobs
+  - `puppet_orchestrator_job_start_timestamp` - Job start time as unix timestamp
+  - `puppet_orchestrator_job_node_count` - Number of nodes targeted per job
+  - `puppet_orchestrator_job_status_total` - Aggregate job counts by state
+  - `puppet_orchestrator_plan_info` - Presence metric per recent plan run with metadata labels
+  - `puppet_orchestrator_plan_duration_seconds` - Duration of completed plan runs
+  - `puppet_orchestrator_plan_start_timestamp` - Plan start time as unix timestamp
+  - `puppet_orchestrator_plan_status_total` - Aggregate plan counts by state
+  - Controlled by `enable_orchestrator_metrics` parameter (default: false)
+  - Uses PE puppet SSL client certificates for Orchestrator API authentication
+  - Configurable job fetch limit via `orchestrator_jobs_limit` parameter (default: 50)
+
 ## [1.3.0] - 2025-10-03
 
 ### Fixed
