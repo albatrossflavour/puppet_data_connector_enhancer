@@ -704,7 +704,8 @@ class PrometheusMetricsGenerator
     items.each do |job|
       job_id = job['name'].to_s
       task_name = job.dig('options', 'task') || job['command'] || 'unknown'
-      environment = job.dig('environment', 'name') || 'unknown'
+      env_raw = job['environment']
+      environment = env_raw.is_a?(Hash) ? (env_raw['name'] || 'unknown') : (env_raw || 'unknown')
       owner = job.dig('owner', 'login') || 'unknown'
       state = job['state'] || 'unknown'
       duration = job['duration']
