@@ -868,26 +868,29 @@ class PrometheusMetricsGenerator
         current = parent
       end
 
-      # Node group info metric (for Node Graph panel nodes frame)
-      # Label names match Grafana Node Graph field expectations
+      # Look up parent group name for readable labels
+      parent_group = groups.find { |g| g['id'] == parent_uuid }
+      parent_name = parent_group ? (parent_group['name'] || '') : ''
+
+      # Node group info metric with clean domain labels
       add_metric('puppet_node_group_info', {
-        id: gid,
-        title: title,
-        subtitle: environment,
-        mainstat: "#{class_count} classes",
-        secondarystat: "depth #{depth}",
-        detail__environment: environment,
-        detail__class_count: class_count.to_s,
-        detail__depth: depth.to_s,
-        detail__has_rules: (rule && rule.length > 0 ? 'yes' : 'no')
+        group_id: gid,
+        group_name: title,
+        environment: environment,
+        parent_group: parent_name,
+        class_count: class_count.to_s,
+        depth: depth.to_s,
+        has_rules: (rule && rule.length > 0 ? 'yes' : 'no')
       }, 1)
 
-      # Edge metric (for Node Graph panel edges frame)
+      # Edge metric for hierarchy relationships
       if parent_id != '' && parent_id != gid
         add_metric('puppet_node_group_edge', {
-          id: "e#{gid}",
-          source: parent_id,
-          target: gid
+          edge_id: "e#{gid}",
+          source_id: parent_id,
+          target_id: gid,
+          source_name: parent_name,
+          target_name: title
         }, 1)
       end
     end
