@@ -929,10 +929,13 @@ class PrometheusMetricsGenerator
     return unless class_resources && class_resources.is_a?(Array)
 
     # Aggregate: count nodes per class and classes per node
+    # Filter out Puppet internal classes that are applied to every node
+    internal_classes = %w[Settings Main].freeze
     class_counts = Hash.new(0)
     node_class_counts = Hash.new(0)
     class_resources.each do |entry|
       next unless entry && entry['title']
+      next if internal_classes.include?(entry['title'])
       class_counts[entry['title']] += 1
       node_class_counts[entry['certname']] += 1 if entry['certname']
     end
