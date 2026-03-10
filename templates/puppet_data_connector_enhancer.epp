@@ -928,18 +928,24 @@ class PrometheusMetricsGenerator
 
     return unless class_resources && class_resources.is_a?(Array)
 
-    # Aggregate: count nodes per class
+    # Aggregate: count nodes per class and classes per node
     class_counts = Hash.new(0)
+    node_class_counts = Hash.new(0)
     class_resources.each do |entry|
       next unless entry && entry['title']
       class_counts[entry['title']] += 1
+      node_class_counts[entry['certname']] += 1 if entry['certname']
     end
 
     class_counts.each do |class_name, count|
       add_metric('puppet_class_usage_total', { class_name: class_name }, count)
     end
 
-    @logger.info("Collected class usage metrics for #{class_counts.length} unique classes")
+    node_class_counts.each do |certname, count|
+      add_metric('puppet_classes_per_node', { node: certname }, count)
+    end
+
+    @logger.info("Collected class usage metrics for #{class_counts.length} unique classes across #{node_class_counts.length} nodes")
   end
 
   def collect_scm_export_health
@@ -1187,6 +1193,10 @@ class PrometheusMetricsGenerator
         },
         'puppet_class_usage_total' => {
           help: 'Number of nodes using each Puppet class',
+          type: 'gauge'
+        },
+        'puppet_classes_per_node' => {
+          help: 'Number of Puppet classes applied to each node',
           type: 'gauge'
         }
       })
