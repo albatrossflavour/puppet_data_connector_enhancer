@@ -875,6 +875,7 @@ class PrometheusMetricsGenerator
       # Node group info metric - value is class count for meaningful aggregation
       add_metric('puppet_node_group_info', {
         group_id: gid,
+        group_uuid: group['id'],
         group_name: title,
         environment: environment,
         parent_group: parent_name,
