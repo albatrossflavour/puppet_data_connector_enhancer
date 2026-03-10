@@ -872,16 +872,15 @@ class PrometheusMetricsGenerator
       parent_group = groups.find { |g| g['id'] == parent_uuid }
       parent_name = parent_group ? (parent_group['name'] || '') : ''
 
-      # Node group info metric with clean domain labels
+      # Node group info metric - value is class count for meaningful aggregation
       add_metric('puppet_node_group_info', {
         group_id: gid,
         group_name: title,
         environment: environment,
         parent_group: parent_name,
-        class_count: class_count.to_s,
         depth: depth.to_s,
         has_rules: (rule && rule.length > 0 ? 'yes' : 'no')
-      }, 1)
+      }, class_count)
 
       # Edge metric for hierarchy relationships
       if parent_id != '' && parent_id != gid
