@@ -840,43 +840,55 @@ class PrometheusMetricsGenerator
 
     return unless groups && groups.is_a?(Array)
 
-    # Build lookup: UUID -> sequential ID and UUID -> group data
-    id_map = {}
-    groups.each_with_index do |group, idx|
-      id_map[group['id']] = (idx + 1).to_s
+    # Build lookup maps: UUID -> group data, UUID -> children
+    by_uuid = {}
+    children = Hash.new { |h, k| h[k] = [] }
+    root_groups = []
+
+    groups.each do |group|
+      by_uuid[group['id']] = group
+      parent_uuid = group['parent']
+      if parent_uuid && parent_uuid != group['id']
+        children[parent_uuid] << group
+      else
+        root_groups << group
+      end
     end
 
-    # Count nodes per group via PuppetDB using the group's classification rules
-    # The NC API provides the group structure; node counts come from the group data
-    groups.each do |group|
-      gid = id_map[group['id']]
+    # Sort children alphabetically at each level for consistent output
+    children.each_value { |c| c.sort_by! { |g| (g['name'] || '').downcase } }
+    root_groups.sort_by! { |g| (g['name'] || '').downcase }
+
+    # DFS traversal to emit metrics in tree order with display names
+    sort_order = 0
+    stack = root_groups.reverse.map { |g| [g, 0, ''] }
+
+    while !stack.empty?
+      group, depth, prefix = stack.pop
+      sort_order += 1
       title = group['name'] || 'unknown'
       environment = group['environment'] || 'production'
-      parent_uuid = group['parent']
-      parent_id = id_map[parent_uuid] || ''
-      depth = 0
       classes = group['classes'] || {}
       class_count = classes.length
       rule = group['rule']
-
-      # Calculate depth by walking parent chain
-      current = group
-      while current['parent'] && current['parent'] != current['id']
-        parent = groups.find { |g| g['id'] == current['parent'] }
-        break unless parent
-        depth += 1
-        current = parent
-      end
-
-      # Look up parent group name for readable labels
-      parent_group = groups.find { |g| g['id'] == parent_uuid }
+      parent_uuid = group['parent']
+      parent_group = by_uuid[parent_uuid]
       parent_name = parent_group ? (parent_group['name'] || '') : ''
+      child_groups = children[group['id']] || []
+
+      # Build tree-indented display name
+      display_name = if depth == 0
+                       title
+                     else
+                       "#{prefix}#{title}"
+                     end
 
       # Node group info metric - value is class count for meaningful aggregation
       add_metric('puppet_node_group_info', {
-        group_id: gid,
         group_uuid: group['id'],
         group_name: title,
+        display_name: display_name,
+        sort_order: format('%03d', sort_order),
         environment: environment,
         parent_group: parent_name,
         depth: depth.to_s,
@@ -884,14 +896,25 @@ class PrometheusMetricsGenerator
       }, class_count)
 
       # Edge metric for hierarchy relationships
-      if parent_id != '' && parent_id != gid
+      if parent_uuid && parent_uuid != group['id']
         add_metric('puppet_node_group_edge', {
-          edge_id: "e#{gid}",
-          source_id: parent_id,
-          target_id: gid,
           source_name: parent_name,
           target_name: title
         }, 1)
+      end
+
+      # Push children onto stack in reverse order (so first child is processed first)
+      # Calculate the prefix for children based on whether this node is the last sibling
+      child_groups.reverse.each_with_index do |child, idx|
+        child_is_last = (idx == 0) # reversed, so index 0 is actually last child
+        if depth == 0
+          child_prefix = child_is_last ? '└─ ' : '├─ '
+        else
+          # Extend prefix: if current node used └─, children get spaces; if ├─, children get │
+          parent_continuation = prefix.end_with?('└─ ') ? '   ' : '│  '
+          child_prefix = parent_continuation + (child_is_last ? '└─ ' : '├─ ')
+        end
+        stack.push([child, depth + 1, child_prefix])
       end
     end
 
@@ -1155,11 +1178,11 @@ class PrometheusMetricsGenerator
     if @config[:enable_classification_metrics]
       header_metrics.merge!({
         'puppet_node_group_info' => {
-          help: 'Node group presence metric with hierarchy metadata for Node Graph visualisation',
+          help: 'Node group classification info with tree hierarchy - value is class count',
           type: 'gauge'
         },
         'puppet_node_group_edge' => {
-          help: 'Node group parent-child relationship edges for Node Graph visualisation',
+          help: 'Node group parent-child relationship edges',
           type: 'gauge'
         },
         'puppet_class_usage_total' => {
