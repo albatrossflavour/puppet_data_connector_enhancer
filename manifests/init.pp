@@ -81,6 +81,10 @@
 # @param orchestrator_jobs_limit
 #   Maximum number of recent orchestrator jobs and plans to fetch per collection.
 #
+# @param enable_classification_metrics
+#   Whether to enable collection of node group classification and class usage metrics.
+#   Requires client certificate access to the Node Classifier API on port 4433.
+#
 # @example Basic usage with default parameters
 #   include puppet_data_connector_enhancer
 #
@@ -106,6 +110,11 @@
 #   class { 'puppet_data_connector_enhancer':
 #     enable_orchestrator_metrics => true,
 #     orchestrator_jobs_limit     => 100,
+#   }
+#
+# @example Enable node group classification and class usage metrics
+#   class { 'puppet_data_connector_enhancer':
+#     enable_classification_metrics => true,
 #   }
 #
 # @example Configure infrastructure servers for Grafana dashboard filters
@@ -140,6 +149,7 @@ class puppet_data_connector_enhancer (
   Stdlib::Absolutepath $scm_log_file                    = '/var/log/puppetlabs/puppet_data_connector_enhancer_scm.log',
   Boolean $enable_orchestrator_metrics                  = false,
   Integer[1, 200] $orchestrator_jobs_limit              = 50,
+  Boolean $enable_classification_metrics                = false,
 ) {
   $dropzone_file = "${dropzone}/${output_filename}"
 
@@ -201,8 +211,9 @@ class puppet_data_connector_enhancer (
         'grafana_server' => pick_default($grafana_server, ''),
         'cd4pe_server'   => pick_default($cd4pe_server, ''),
         'scm_dir'                    => $scm_dir,
-        'enable_orchestrator_metrics' => $enable_orchestrator_metrics,
-        'orchestrator_jobs_limit'     => $orchestrator_jobs_limit,
+        'enable_orchestrator_metrics'  => $enable_orchestrator_metrics,
+        'orchestrator_jobs_limit'      => $orchestrator_jobs_limit,
+        'enable_classification_metrics' => $enable_classification_metrics,
     }),
     mode    => '0755',
     owner   => 'pe-puppet',

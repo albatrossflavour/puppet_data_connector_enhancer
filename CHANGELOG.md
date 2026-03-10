@@ -21,6 +21,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - Controlled by `enable_orchestrator_metrics` parameter (default: false)
   - Uses PE puppet SSL client certificates for Orchestrator API authentication
   - Configurable job fetch limit via `orchestrator_jobs_limit` parameter (default: 50)
+- **Node Group Classification and Class Usage Metrics**: Optional collection from the NC API and PuppetDB
+  - `puppet_node_group_info` - Node group hierarchy with labels designed for Grafana Node Graph panel
+  - `puppet_node_group_edge` - Parent-child edges between node groups for graph visualisation
+  - `puppet_class_usage_total` - Aggregate count of nodes using each Puppet class
+  - Controlled by `enable_classification_metrics` parameter (default: false)
+  - Uses PE puppet SSL client certificates for Node Classifier API authentication (port 4433)
 
 ## [1.3.0] - 2025-10-03
 

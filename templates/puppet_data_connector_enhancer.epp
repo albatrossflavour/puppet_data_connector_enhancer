@@ -10,6 +10,7 @@
       String $scm_dir,
       Boolean $enable_orchestrator_metrics,
       Integer $orchestrator_jobs_limit,
+      Boolean $enable_classification_metrics,
 | -%>
 #!/opt/puppetlabs/puppet/bin/ruby
 
@@ -68,6 +69,11 @@ class PrometheusMetricsGenerator
       collect_with_error_handling('orchestrator_plans') { collect_orchestrator_plans }
     end
 
+    if @config[:enable_classification_metrics]
+      collect_with_error_handling('node_groups') { collect_node_groups }
+      collect_with_error_handling('class_usage') { collect_class_usage }
+    end
+
     output_metrics
   end
 
@@ -101,7 +107,11 @@ class PrometheusMetricsGenerator
       orchestrator_jobs_limit: ENV['ORCHESTRATOR_JOBS_LIMIT']&.to_i || <%= $orchestrator_jobs_limit %>,
       ssl_cert_file: ENV['SSL_CERT_FILE'] || '/etc/puppetlabs/puppet/ssl/certs/<%= $puppet_server %>.pem',
       ssl_key_file: ENV['SSL_KEY_FILE'] || '/etc/puppetlabs/puppet/ssl/private_keys/<%= $puppet_server %>.pem',
-      ssl_ca_file: ENV['SSL_CA_FILE'] || '/etc/puppetlabs/puppet/ssl/certs/ca.pem'
+      ssl_ca_file: ENV['SSL_CA_FILE'] || '/etc/puppetlabs/puppet/ssl/certs/ca.pem',
+      enable_classification_metrics: ENV['ENABLE_CLASSIFICATION_METRICS'] == 'true' || <%= $enable_classification_metrics %>,
+      classifier_host: ENV['CLASSIFIER_HOST'] || '<%= $puppet_server %>',
+      classifier_port: ENV['CLASSIFIER_PORT']&.to_i || 4433,
+      classifier_protocol: ENV['CLASSIFIER_PROTOCOL'] || 'https'
     }
   end
 
@@ -116,6 +126,10 @@ class PrometheusMetricsGenerator
 
   def orchestrator_base_url
     "#{@config[:orchestrator_protocol]}://#{@config[:orchestrator_host]}:#{@config[:orchestrator_port]}"
+  end
+
+  def classifier_base_url
+    "#{@config[:classifier_protocol]}://#{@config[:classifier_host]}:#{@config[:classifier_port]}"
   end
 
   # Metric formatting and sanitization methods
@@ -820,6 +834,88 @@ class PrometheusMetricsGenerator
     @logger.info("Collected orchestrator plan metrics for #{items.length} plans")
   end
 
+  def collect_node_groups
+    uri = "#{classifier_base_url}/classifier-api/v1/groups"
+    groups = fetch_json_from_orchestrator(uri)
+
+    return unless groups && groups.is_a?(Array)
+
+    # Build lookup: UUID -> sequential ID and UUID -> group data
+    id_map = {}
+    groups.each_with_index do |group, idx|
+      id_map[group['id']] = (idx + 1).to_s
+    end
+
+    # Count nodes per group via PuppetDB using the group's classification rules
+    # The NC API provides the group structure; node counts come from the group data
+    groups.each do |group|
+      gid = id_map[group['id']]
+      title = group['name'] || 'unknown'
+      environment = group['environment'] || 'production'
+      parent_uuid = group['parent']
+      parent_id = id_map[parent_uuid] || ''
+      depth = 0
+      classes = group['classes'] || {}
+      class_count = classes.length
+      rule = group['rule']
+
+      # Calculate depth by walking parent chain
+      current = group
+      while current['parent'] && current['parent'] != current['id']
+        parent = groups.find { |g| g['id'] == current['parent'] }
+        break unless parent
+        depth += 1
+        current = parent
+      end
+
+      # Node group info metric (for Node Graph panel nodes frame)
+      # Label names match Grafana Node Graph field expectations
+      add_metric('puppet_node_group_info', {
+        id: gid,
+        title: title,
+        subtitle: environment,
+        mainstat: "#{class_count} classes",
+        secondarystat: "depth #{depth}",
+        detail__environment: environment,
+        detail__class_count: class_count.to_s,
+        detail__depth: depth.to_s,
+        detail__has_rules: (rule && rule.length > 0 ? 'yes' : 'no')
+      }, 1)
+
+      # Edge metric (for Node Graph panel edges frame)
+      if parent_id != '' && parent_id != gid
+        add_metric('puppet_node_group_edge', {
+          id: "e#{gid}",
+          source: parent_id,
+          target: gid
+        }, 1)
+      end
+    end
+
+    @logger.info("Collected node group metrics for #{groups.length} groups")
+  end
+
+  def collect_class_usage
+    uri = "#{puppetdb_base_url}/pdb/query/v4"
+    params = { 'query' => 'resources[certname, title] { type = "Class" }' }
+    class_resources = fetch_json_from_puppetdb(uri, params)
+
+    return unless class_resources && class_resources.is_a?(Array)
+
+    # Aggregate: count nodes per class
+    class_counts = Hash.new(0)
+    class_resources.each do |entry|
+      next unless entry && entry['title']
+      class_counts[entry['title']] += 1
+    end
+
+    class_counts.each do |class_name, count|
+      add_metric('puppet_class_usage_total', { class_name: class_name }, count)
+    end
+
+    @logger.info("Collected class usage metrics for #{class_counts.length} unique classes")
+  end
+
   def collect_scm_export_health
     # Only collect SCM export metrics if status file exists (SCM collection enabled)
     status_file = '<%= $scm_dir %>/scm_export_status.json'
@@ -1047,6 +1143,24 @@ class PrometheusMetricsGenerator
         },
         'puppet_orchestrator_plan_status_total' => {
           help: 'Aggregate count of PE Orchestrator plan runs by state',
+          type: 'gauge'
+        }
+      })
+    end
+
+    # Classification metrics (conditional on feature flag)
+    if @config[:enable_classification_metrics]
+      header_metrics.merge!({
+        'puppet_node_group_info' => {
+          help: 'Node group presence metric with hierarchy metadata for Node Graph visualisation',
+          type: 'gauge'
+        },
+        'puppet_node_group_edge' => {
+          help: 'Node group parent-child relationship edges for Node Graph visualisation',
+          type: 'gauge'
+        },
+        'puppet_class_usage_total' => {
+          help: 'Number of nodes using each Puppet class',
           type: 'gauge'
         }
       })

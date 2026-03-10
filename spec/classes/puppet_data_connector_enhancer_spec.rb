@@ -407,6 +407,38 @@ describe 'puppet_data_connector_enhancer' do
         end
       end
 
+      context 'with classification metrics enabled' do
+        let(:params) do
+          super().merge(
+            'enable_classification_metrics' => true,
+          )
+        end
+
+        it { is_expected.to compile.with_all_deps }
+
+        it 'includes node group collector in script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{collect_node_groups})
+        end
+
+        it 'includes class usage collector in script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{collect_class_usage})
+        end
+
+        it 'includes classifier config in script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{enable_classification_metrics:.*true})
+        end
+      end
+
+      context 'with classification metrics disabled (default)' do
+        it 'does not enable classification metrics' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{enable_classification_metrics:.*false})
+        end
+      end
+
       context 'resource ordering' do
         it 'ensures base directory is created before script' do
           is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
