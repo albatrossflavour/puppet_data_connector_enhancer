@@ -34,4 +34,7 @@ metrics:
 <% } else { -%>
     filter: null
 <% } -%>
+<% if $metric['row_limit'] { -%>
+    row_limit: <%= $metric['row_limit'] %>
+<% } -%>
 <% } -%>

@@ -12,6 +12,7 @@
       Boolean $enable_orchestrator_metrics,
       Integer $orchestrator_jobs_limit,
       Boolean $enable_classification_metrics,
+      Integer $custom_queries_row_limit,
 | -%>
 #!/opt/puppetlabs/puppet/bin/ruby
 
@@ -159,6 +160,7 @@ class PrometheusMetricsGenerator
       grafana_server: '<%= $grafana_server %>',
       cd4pe_server: '<%= $cd4pe_server %>',
       custom_queries_file: ENV['CUSTOM_QUERIES_FILE'] || '<%= $custom_queries_file %>',
+      custom_queries_row_limit: ENV['CUSTOM_QUERIES_ROW_LIMIT']&.to_i || <%= $custom_queries_row_limit %>,
       enable_orchestrator_metrics: ENV['ENABLE_ORCHESTRATOR_METRICS'] == 'true' || <%= $enable_orchestrator_metrics %>,
       orchestrator_host: ENV['ORCHESTRATOR_HOST'] || '<%= $puppet_server %>',
       orchestrator_port: ENV['ORCHESTRATOR_PORT']&.to_i || 8143,
@@ -1132,53 +1134,73 @@ class PrometheusMetricsGenerator
   def fetch_custom_metric_data(defn)
     endpoint = defn['endpoint']
     filter = defn['filter']
+    row_limit = defn.fetch('row_limit', @config[:custom_queries_row_limit]).to_i
 
-    case endpoint
-    when 'fact'
-      fact_name = defn['fact_name']
-      unless fact_name
-        @logger.warn("Custom metric '#{defn['name']}': fact endpoint requires fact_name")
-        return []
-      end
-      uri = "#{puppetdb_base_url}/pdb/query/v4/facts/#{fact_name}"
-      params = {}
-      params['query'] = filter if filter
-      fetch_json_from_puppetdb(uri, params) || []
+    rows = case endpoint
+           when 'fact'
+             fact_name = defn['fact_name']
+             unless fact_name
+               @logger.warn("Custom metric '#{defn['name']}': fact endpoint requires fact_name")
+               return []
+             end
+             uri = "#{puppetdb_base_url}/pdb/query/v4/facts/#{fact_name}"
+             params = {}
+             params['query'] = filter if filter
+             params['limit'] = row_limit.to_s if row_limit.positive?
+             fetch_json_from_puppetdb(uri, params) || []
 
-    when 'pql'
-      pql_query = defn['pql_query']
-      unless pql_query
-        @logger.warn("Custom metric '#{defn['name']}': pql endpoint requires pql_query")
-        return []
-      end
-      uri = "#{puppetdb_base_url}/pdb/query/v4"
-      params = { 'query' => pql_query }
-      fetch_json_from_puppetdb(uri, params) || []
+           when 'pql'
+             pql_query = defn['pql_query']
+             unless pql_query
+               @logger.warn("Custom metric '#{defn['name']}': pql endpoint requires pql_query")
+               return []
+             end
+             uri = "#{puppetdb_base_url}/pdb/query/v4"
+             params = { 'query' => pql_query }
+             params['limit'] = row_limit.to_s if row_limit.positive?
+             fetch_json_from_puppetdb(uri, params) || []
 
-    when 'resource'
-      resource_type = defn['resource_type']
-      unless resource_type
-        @logger.warn("Custom metric '#{defn['name']}': resource endpoint requires resource_type")
-        return []
-      end
-      uri = "#{puppetdb_base_url}/pdb/query/v4/resources/#{resource_type}"
-      params = {}
-      if defn['resource_title']
-        params['query'] = "[\"=\", \"title\", \"#{defn['resource_title']}\"]"
-      end
-      params['query'] = filter if filter
-      fetch_json_from_puppetdb(uri, params) || []
+           when 'resource'
+             resource_type = defn['resource_type']
+             unless resource_type
+               @logger.warn("Custom metric '#{defn['name']}': resource endpoint requires resource_type")
+               return []
+             end
+             uri = "#{puppetdb_base_url}/pdb/query/v4/resources/#{resource_type}"
+             params = {}
+             if defn['resource_title']
+               params['query'] = "[\"=\", \"title\", \"#{defn['resource_title']}\"]"
+             end
+             params['query'] = filter if filter
+             params['limit'] = row_limit.to_s if row_limit.positive?
+             fetch_json_from_puppetdb(uri, params) || []
 
-    when 'inventory'
-      uri = "#{puppetdb_base_url}/pdb/query/v4/inventory"
-      params = {}
-      params['query'] = filter if filter
-      fetch_json_from_puppetdb(uri, params) || []
+           when 'inventory'
+             uri = "#{puppetdb_base_url}/pdb/query/v4/inventory"
+             params = {}
+             params['query'] = filter if filter
+             params['limit'] = row_limit.to_s if row_limit.positive?
+             fetch_json_from_puppetdb(uri, params) || []
 
-    else
-      @logger.warn("Custom metric '#{defn['name']}': unknown endpoint '#{endpoint}'")
-      []
+           when 'nodes'
+             uri = "#{puppetdb_base_url}/pdb/query/v4/nodes"
+             params = {}
+             params['query'] = filter if filter
+             params['limit'] = row_limit.to_s if row_limit.positive?
+             fetch_json_from_puppetdb(uri, params) || []
+
+           else
+             @logger.warn("Custom metric '#{defn['name']}': unknown endpoint '#{endpoint}'")
+             return []
+           end
+
+    # Ruby-side safety net for row limiting (D-13 fallback)
+    if row_limit.positive? && rows.length > row_limit
+      @logger.warn("Custom metric '#{defn['name']}': truncating #{rows.length} rows to #{row_limit}")
+      rows = rows.first(row_limit)
     end
+
+    rows
   end
 
   def extract_labels(row, labels_map)
