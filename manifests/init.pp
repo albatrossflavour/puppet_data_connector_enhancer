@@ -74,6 +74,14 @@
 # @param scm_log_file
 #   The path to the SCM export script log file.
 #
+# @param custom_queries
+#   An array of custom metric definition hashes. Each hash defines a PuppetDB query
+#   and its Prometheus metric mapping. See CLAUDE.md for the full YAML field reference.
+#
+# @param custom_queries_file
+#   Override the path to the custom queries YAML config file. Defaults to
+#   ${scm_dir}/custom_queries.yaml.
+#
 # @example Basic usage with default parameters
 #   include puppet_data_connector_enhancer
 #
@@ -102,6 +110,26 @@
 #     cd4pe_server   => 'cd4pe.example.com',
 #   }
 #
+# @example Custom PuppetDB metrics via YAML-driven queries
+#   class { 'puppet_data_connector_enhancer':
+#     custom_queries => [
+#       {
+#         'name'       => 'puppet_custom_nginx_version',
+#         'type'       => 'gauge',
+#         'help'       => 'Nginx version per node',
+#         'endpoint'   => 'fact',
+#         'fact_name'  => 'packages',
+#         'labels'     => {
+#           'node'        => 'certname',
+#           'environment' => 'environment',
+#           'version'     => 'value.nginx.version',
+#         },
+#         'value_field' => undef,
+#         'filter'      => undef,
+#       },
+#     ],
+#   }
+#
 class puppet_data_connector_enhancer (
   Enum['present', 'absent'] $ensure                     = 'present',
   Optional[Stdlib::Absolutepath] $script_path           = undef,
@@ -125,11 +153,16 @@ class puppet_data_connector_enhancer (
   Integer[1] $scm_max_wait_time                         = 900,
   Pattern[/^.+$/] $scm_timer_interval                   = '*:0/30',
   Stdlib::Absolutepath $scm_log_file                    = '/var/log/puppetlabs/puppet_data_connector_enhancer_scm.log',
+  Optional[Array] $custom_queries                       = undef,
+  Optional[Stdlib::Absolutepath] $custom_queries_file   = undef,
 ) {
   $dropzone_file = "${dropzone}/${output_filename}"
 
   # Set script path - defaults to scm_dir location
   $_script_path = pick($script_path, "${scm_dir}/puppet_data_connector_enhancer")
+
+  # Set custom queries file path
+  $_custom_queries_file = pick($custom_queries_file, "${scm_dir}/custom_queries.yaml")
 
   # Validate SCM configuration if enabled
   if $enable_scm_collection {
@@ -172,25 +205,44 @@ class puppet_data_connector_enhancer (
     mode   => '0755',
   }
 
+  # Manage custom queries YAML config file
+  if $custom_queries {
+    file { $_custom_queries_file:
+      ensure  => 'file',
+      content => epp('puppet_data_connector_enhancer/custom_queries.yaml.epp', {
+          'metrics' => $custom_queries,
+      }),
+      mode    => '0644',
+      owner   => 'pe-puppet',
+      group   => 'pe-puppet',
+      require => File[$scm_dir],
+    }
+  } else {
+    file { $_custom_queries_file:
+      ensure => 'absent',
+    }
+  }
+
   # Install the main metrics collection script
   file { $_script_path:
     ensure  => $ensure,
     content => epp('puppet_data_connector_enhancer/puppet_data_connector_enhancer.epp', {
-        'http_timeout'   => $http_timeout,
-        'http_retries'   => $http_retries,
-        'retry_delay'    => $retry_delay,
-        'log_level'      => $log_level,
-        'dropzone_file'  => $dropzone_file,
-        'puppet_server'  => pick_default($puppet_server, ''),
-        'scm_server'     => pick_default($scm_server, ''),
-        'grafana_server' => pick_default($grafana_server, ''),
-        'cd4pe_server'   => pick_default($cd4pe_server, ''),
-        'scm_dir'        => $scm_dir,
+        'http_timeout'        => $http_timeout,
+        'http_retries'        => $http_retries,
+        'retry_delay'         => $retry_delay,
+        'log_level'           => $log_level,
+        'dropzone_file'       => $dropzone_file,
+        'puppet_server'       => pick_default($puppet_server, ''),
+        'scm_server'          => pick_default($scm_server, ''),
+        'grafana_server'      => pick_default($grafana_server, ''),
+        'cd4pe_server'        => pick_default($cd4pe_server, ''),
+        'scm_dir'             => $scm_dir,
+        'custom_queries_file' => $_custom_queries_file,
     }),
     mode    => '0755',
     owner   => 'pe-puppet',
     group   => 'pe-puppet',
-    require => [Class['puppet_data_connector'], File[$scm_dir]],
+    require => [Class['puppet_data_connector'], File[$scm_dir], File[$_custom_queries_file]],
   }
 
   # Create systemd service and timer for scheduled execution

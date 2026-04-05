@@ -8,6 +8,7 @@
       String $grafana_server,
       String $cd4pe_server,
       String $scm_dir,
+      String $custom_queries_file,
 | -%>
 #!/opt/puppetlabs/puppet/bin/ruby
 
@@ -21,6 +22,7 @@ require 'fileutils'
 require 'set'
 require 'timeout'
 require 'openssl'
+require 'yaml'
 
 # Custom exceptions for better error handling
 class MetricsCollectionError < StandardError
@@ -60,6 +62,7 @@ class PrometheusMetricsGenerator
     collect_with_error_handling('cis_score') { collect_cis_score }
     collect_with_error_handling('scm_export_health') { collect_scm_export_health }
     collect_with_error_handling('infrastructure_config') { collect_infrastructure_config }
+    collect_with_error_handling('custom_metrics') { collect_custom_metrics }
 
     output_metrics
   end
@@ -86,7 +89,8 @@ class PrometheusMetricsGenerator
       puppet_server: '<%= $puppet_server %>',
       scm_server: '<%= $scm_server %>',
       grafana_server: '<%= $grafana_server %>',
-      cd4pe_server: '<%= $cd4pe_server %>'
+      cd4pe_server: '<%= $cd4pe_server %>',
+      custom_queries_file: ENV['CUSTOM_QUERIES_FILE'] || '<%= $custom_queries_file %>'
     }
   end
 
@@ -651,6 +655,170 @@ class PrometheusMetricsGenerator
     end
   end
 
+  def collect_custom_metrics
+    config_file = @config[:custom_queries_file]
+
+    unless File.exist?(config_file)
+      @logger.debug("Custom queries config file not found: #{config_file}")
+      return
+    end
+
+    begin
+      yaml_content = File.read(config_file)
+      config = YAML.safe_load(yaml_content, permitted_classes: [])
+    rescue Psych::SyntaxError => e
+      @logger.error("Failed to parse custom queries YAML: #{e.message}")
+      raise MetricsCollectionError.new("Invalid custom queries YAML: #{e.message}", config_file)
+    rescue StandardError => e
+      @logger.error("Failed to read custom queries file: #{e.message}")
+      raise MetricsCollectionError.new("Cannot read custom queries file: #{e.message}", config_file)
+    end
+
+    return unless config && config['metrics'].is_a?(Array)
+
+    @custom_metric_definitions = config['metrics']
+    @custom_metric_definitions.each do |defn|
+      collect_single_custom_metric(defn)
+    end
+
+    @logger.info("Processed #{@custom_metric_definitions.length} custom metric definitions")
+  end
+
+  def collect_single_custom_metric(defn)
+    name = defn['name']
+    unless name && !name.empty?
+      @logger.warn("Skipping custom metric with missing name")
+      return
+    end
+
+    begin
+      rows = fetch_custom_metric_data(defn)
+      return unless rows && rows.is_a?(Array)
+
+      labels_map = defn['labels'] || {}
+      value_field = defn['value_field']
+
+      rows.each do |row|
+        labels = extract_labels(row, labels_map)
+        value = extract_value(row, value_field)
+        add_metric(name, labels, value)
+      end
+
+      @logger.debug("Custom metric '#{name}': emitted #{rows.length} rows")
+    rescue MetricsCollectionError
+      raise
+    rescue StandardError => e
+      @logger.error("Error collecting custom metric '#{name}': #{e.message}")
+      @data << build_metric('puppet_exporter_collection_failed', {
+        collection: "custom_metric_#{name}",
+        endpoint: defn['endpoint'] || 'unknown',
+        error: e.message[0..100]
+      })
+    end
+  end
+
+  def fetch_custom_metric_data(defn)
+    endpoint = defn['endpoint']
+    filter = defn['filter']
+
+    case endpoint
+    when 'fact'
+      fact_name = defn['fact_name']
+      unless fact_name
+        @logger.warn("Custom metric '#{defn['name']}': fact endpoint requires fact_name")
+        return []
+      end
+      uri = "#{puppetdb_base_url}/pdb/query/v4/facts/#{fact_name}"
+      params = {}
+      params['query'] = filter if filter
+      fetch_json_from_puppetdb(uri, params) || []
+
+    when 'pql'
+      pql_query = defn['pql_query']
+      unless pql_query
+        @logger.warn("Custom metric '#{defn['name']}': pql endpoint requires pql_query")
+        return []
+      end
+      uri = "#{puppetdb_base_url}/pdb/query/v4"
+      params = { 'query' => pql_query }
+      fetch_json_from_puppetdb(uri, params) || []
+
+    when 'resource'
+      resource_type = defn['resource_type']
+      unless resource_type
+        @logger.warn("Custom metric '#{defn['name']}': resource endpoint requires resource_type")
+        return []
+      end
+      uri = "#{puppetdb_base_url}/pdb/query/v4/resources/#{resource_type}"
+      params = {}
+      if defn['resource_title']
+        params['query'] = "[\"=\", \"title\", \"#{defn['resource_title']}\"]"
+      end
+      params['query'] = filter if filter
+      fetch_json_from_puppetdb(uri, params) || []
+
+    when 'inventory'
+      uri = "#{puppetdb_base_url}/pdb/query/v4/inventory"
+      params = {}
+      params['query'] = filter if filter
+      fetch_json_from_puppetdb(uri, params) || []
+
+    else
+      @logger.warn("Custom metric '#{defn['name']}': unknown endpoint '#{endpoint}'")
+      []
+    end
+  end
+
+  def extract_labels(row, labels_map)
+    labels = {}
+    labels_map.each do |label_name, json_path|
+      value = resolve_json_path(row, json_path)
+      labels[label_name.to_sym] = value.to_s unless value.nil?
+    end
+    labels
+  end
+
+  def extract_value(row, value_field)
+    return 1 if value_field.nil?
+
+    resolved = resolve_json_path(row, value_field)
+    return 1 if resolved.nil?
+
+    numeric = resolved.to_s.to_f
+    numeric == numeric.to_i ? numeric.to_i : numeric
+  end
+
+  def resolve_json_path(obj, path)
+    return nil if obj.nil? || path.nil?
+
+    path.to_s.split('.').reduce(obj) do |current, key|
+      return nil if current.nil?
+
+      if current.is_a?(Array)
+        idx = Integer(key, exception: false)
+        idx ? current[idx] : nil
+      elsif current.is_a?(Hash)
+        current[key]
+      else
+        nil
+      end
+    end
+  end
+
+  def collect_custom_metric_headers
+    return {} unless @custom_metric_definitions&.is_a?(Array)
+
+    headers = {}
+    @custom_metric_definitions.each do |defn|
+      next unless defn['name'] && defn['type'] && defn['help']
+      headers[defn['name']] = {
+        help: defn['help'],
+        type: defn['type']
+      }
+    end
+    headers
+  end
+
   def output_metrics
     # Add summary statistics
     @data << build_metric('puppet_patching_stats', { type: 'nodes_to_patch' }, @patch_count)
@@ -807,6 +975,12 @@ class PrometheusMetricsGenerator
     }
 
     header_metrics.each do |name, info|
+      header_lines << "# HELP #{name} #{info[:help]}"
+      header_lines << "# TYPE #{name} #{info[:type]}"
+    end
+
+    # Append custom metric headers
+    collect_custom_metric_headers.each do |name, info|
       header_lines << "# HELP #{name} #{info[:help]}"
       header_lines << "# TYPE #{name} #{info[:type]}"
     end
