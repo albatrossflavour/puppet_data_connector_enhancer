@@ -90,6 +90,7 @@ class CustomMetricBuilder
     @config_file = DEFAULT_CONFIG_FILE
     @preview_only = false
     @live_preview_enabled = false
+    @demo_mode = false
     parse_arguments
   end
 
@@ -101,6 +102,10 @@ class CustomMetricBuilder
 
   def live_preview?
     @live_preview_enabled
+  end
+
+  def demo_mode?
+    @demo_mode
   end
 
   # Collect inputs from flags or interactive prompts
@@ -143,6 +148,28 @@ class CustomMetricBuilder
     end
     puts '------------------------------------'
     puts ''
+  end
+
+  # Show demo data: raw PuppetDB response and field suggestions
+  def show_demo_data(defn)
+    data = fetch_sample_data(defn, 5)
+
+    puts ''
+    puts '--- Demo: Raw PuppetDB Response ---'
+
+    if data.nil? || data.empty?
+      puts '(no data returned)'
+    else
+      puts JSON.pretty_generate(data)
+      puts ''
+      puts 'Returned %d rows' % data.length
+    end
+
+    puts '-----------------------------------'
+
+    suggest_labels_from_data(data)
+  rescue StandardError => e
+    STDERR.puts 'Demo fetch failed: %s' % e.message
   end
 
   # Write validated definition to the YAML config file
@@ -223,6 +250,10 @@ class CustomMetricBuilder
         @live_preview_enabled = true
       end
 
+      opts.on('--demo', 'Fetch and display raw data from PuppetDB, suggest labels and value fields') do
+        @demo_mode = true
+      end
+
       opts.on('--config-file PATH', 'YAML config file path (default: %s)' % DEFAULT_CONFIG_FILE) do |v|
         @config_file = v
       end
@@ -285,6 +316,15 @@ class CustomMetricBuilder
       defn['fact_name'] = prompt_simple('Fact name')
     when 'resource'
       defn['resource_type'] = prompt_simple('Resource type (e.g. Package, Service)')
+    end
+
+    # 3b. Offer demo after query is known
+    if endpoint_supports_demo?(defn)
+      print "\nRun demo query to see data shape? [Y/n]: "
+      answer = STDIN.gets&.chomp
+      unless answer&.strip&.downcase == 'n'
+        show_demo_data(defn)
+      end
     end
 
     # 4. Prometheus metric type
@@ -465,20 +505,20 @@ class CustomMetricBuilder
     nil
   end
 
-  # Fetch sample data from PuppetDB for live preview
-  def fetch_sample_data(defn)
+  # Fetch sample data from PuppetDB for live preview or demo mode
+  def fetch_sample_data(defn, limit = 3)
     case defn['endpoint']
     when 'pql'
       query = sanitise_pql_timestamp(defn['pql_query'], defn['name'])
-      fetch_puppetdb_pql(query, 3)
+      fetch_puppetdb_pql(query, limit)
     when 'fact'
-      fetch_puppetdb_facts(defn['fact_name'], 3)
+      fetch_puppetdb_facts(defn['fact_name'], limit)
     when 'resource'
-      fetch_puppetdb_resources(defn['resource_type'], 3)
+      fetch_puppetdb_resources(defn['resource_type'], limit)
     when 'inventory'
-      fetch_puppetdb_inventory(3)
+      fetch_puppetdb_inventory(limit)
     when 'nodes'
-      fetch_puppetdb_nodes(3)
+      fetch_puppetdb_nodes(limit)
     end
   end
 
@@ -582,6 +622,95 @@ class CustomMetricBuilder
   def existing_metric_names
     config = load_existing_config
     Set.new(config['metrics'].map { |m| m['name'] })
+  end
+
+  # -------------------------------------------------------
+  # Demo mode helpers
+  # -------------------------------------------------------
+
+  # Analyse fields in the first row and suggest labels vs value paths
+  def suggest_labels_from_data(data)
+    return if data.nil? || data.empty?
+
+    row = data.first
+    string_fields = []
+    numeric_fields = []
+    skipped_fields = []
+
+    walk_structure(row, '', string_fields, numeric_fields, skipped_fields)
+
+    puts ''
+    puts '--- Field Suggestions ---'
+
+    if string_fields.any?
+      puts ''
+      puts 'Potential LABELS (string fields):'
+      string_fields.each { |path| puts '  --labels %s=%s' % [label_name_from_path(path), path] }
+    end
+
+    if numeric_fields.any?
+      puts ''
+      puts 'Potential VALUE fields (numeric):'
+      numeric_fields.each { |path| puts '  --value-path %s' % path }
+    end
+
+    if skipped_fields.any?
+      puts ''
+      puts 'Skipped (timestamps/complex):'
+      skipped_fields.each { |path, reason| puts '  %s (%s)' % [path, reason] }
+    end
+
+    puts '-------------------------'
+    puts ''
+  end
+
+  # Recursive walker for nested hash structures (max depth 3)
+  def walk_structure(obj, prefix, strings, numerics, skipped, depth = 0)
+    return if depth > 3
+
+    case obj
+    when Hash
+      obj.each do |key, value|
+        path = prefix.empty? ? key.to_s : '%s.%s' % [prefix, key]
+        case value
+        when Hash
+          walk_structure(value, path, strings, numerics, skipped, depth + 1)
+        when Array
+          skipped << [path, 'array'] unless value.empty?
+        when Numeric
+          numerics << path
+        when String
+          if value.match?(ISO8601_TIMESTAMP_PATTERN)
+            skipped << [path, 'timestamp']
+          else
+            strings << path
+          end
+        when TrueClass, FalseClass
+          strings << path
+        when NilClass
+          skipped << [path, 'null']
+        end
+      end
+    end
+  end
+
+  # Convert a dot-path to a valid Prometheus label name
+  def label_name_from_path(path)
+    name = path.split('.').last.downcase.gsub(%r{[^a-z0-9]}, '_').gsub(/_+/, '_')
+    name = name[1..] while name.start_with?('_')
+    name = 'label' if name.empty?
+    name
+  end
+
+  # Check whether the current definition has enough info for a demo fetch
+  def endpoint_supports_demo?(defn)
+    case defn['endpoint']
+    when 'pql' then defn.key?('pql_query')
+    when 'fact' then defn.key?('fact_name')
+    when 'resource' then defn.key?('resource_type')
+    when 'inventory', 'nodes' then true
+    else false
+    end
   end
 
   # -------------------------------------------------------
@@ -716,10 +845,19 @@ end
 builder = CustomMetricBuilder.new
 defn = builder.collect_inputs
 
+# Demo mode: show data and field suggestions
+if builder.demo_mode?
+  builder.show_demo_data(defn)
+end
+
 errors = builder.validate(defn)
 if errors.any?
-  errors.each { |e| STDERR.puts "ERROR: #{e}" }
-  exit 1
+  # In demo mode, validation errors are expected (user is exploring, not writing)
+  unless builder.demo_mode?
+    errors.each { |e| STDERR.puts "ERROR: #{e}" }
+    exit 1
+  end
+  exit 0
 end
 
 builder.show_preview(defn)
