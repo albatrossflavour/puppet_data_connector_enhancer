@@ -233,7 +233,7 @@ class PrometheusMetricsGenerator
     end
 
     if @seen_metrics.include?(metric_key)
-      @logger.warn("Duplicate metric detected: #{metric_key}")
+      @logger.debug("Duplicate metric detected: #{metric_key}")
       return
     end
 
@@ -1116,6 +1116,10 @@ class PrometheusMetricsGenerator
         labels = extract_labels(row, labels_map)
         value = extract_value(row, value_field)
         add_metric(name, labels, value)
+      end
+
+      if labels_map.empty? && rows.length > 1
+        @logger.warn("Custom metric '#{name}' returned #{rows.length} rows but has no labels defined — only the first row's value was used. Consider adding labels to differentiate rows.")
       end
 
       @logger.debug("Custom metric '#{name}': emitted #{rows.length} rows")
