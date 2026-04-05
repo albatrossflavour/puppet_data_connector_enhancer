@@ -1,0 +1,731 @@
+<%- | String $custom_queries_file,
+      String $puppet_server,
+      Integer $custom_queries_row_limit,
+| -%>
+#!/opt/puppetlabs/puppet/bin/ruby
+
+# frozen_string_literal: true
+
+require 'json'
+require 'net/http'
+require 'uri'
+require 'yaml'
+require 'set'
+require 'openssl'
+require 'optparse'
+require 'fileutils'
+
+# CLI tool for building custom metric definitions interactively or via flags.
+# Validates inputs using the same rules as the runtime metrics collector,
+# shows a preview of the Prometheus exposition output, and writes validated
+# definitions to the YAML config file.
+#
+# Deployed alongside the main puppet_data_connector_enhancer script.
+class CustomMetricBuilder
+  # Built-in metric name registry for collision detection (D-08)
+  # Must match the main script exactly
+  BUILTIN_METRIC_PREFIXES = Set.new([
+    'puppet_configuration_version',
+    'puppet_node_count',
+    'puppet_state_overview',
+    'puppet_node_os',
+    'puppet_node_os_count',
+    'puppet_infra_assistant_tokens_total',
+    'puppet_node_trusted',
+    'puppet_patch_run',
+    'puppet_restart_required',
+    'puppet_patching_data',
+    'puppet_patching_blocked',
+    'puppet_patching_group',
+    'puppet_patching_stats',
+    'puppet_patching_groups',
+    'puppet_cis_compliance_score',
+    'puppet_scm_export_success',
+    'puppet_scm_export_last_run_timestamp',
+    'puppet_scm_export_last_success_timestamp',
+    'puppet_scm_export_duration_seconds',
+    'puppet_scm_export_nodes_count',
+    'puppet_scm_export_info',
+    'puppet_infrastructure_config',
+    'puppet_exporter_collection_failed',
+    'puppet_exporter_scrape_duration_seconds',
+    'puppet_exporter_scrape_success',
+    'puppet_exporter_last_scrape_timestamp',
+    'puppet_orchestrator_job_info',
+    'puppet_orchestrator_job_duration_seconds',
+    'puppet_orchestrator_job_start_timestamp',
+    'puppet_orchestrator_job_node_count',
+    'puppet_orchestrator_job_status_total',
+    'puppet_orchestrator_plan_info',
+    'puppet_orchestrator_plan_duration_seconds',
+    'puppet_orchestrator_plan_start_timestamp',
+    'puppet_orchestrator_plan_status_total',
+    'puppet_node_group_info',
+    'puppet_node_group_edge',
+    'puppet_class_usage_total',
+  ]).freeze
+
+  VALID_ENDPOINT_TYPES = %w[fact pql resource inventory nodes].freeze
+  VALID_METRIC_TYPES = %w[gauge counter histogram summary untyped].freeze
+  PROMETHEUS_NAME_PATTERN = %r{^[a-z][a-z0-9_]*$}
+  PROMETHEUS_LABEL_PATTERN = %r{^[a-z][a-z0-9_]*$}
+  DANGEROUS_PQL_PATTERNS = [
+    /;/,
+    /\b(DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE)\b/i,
+    /--/,
+    %r{/\*},
+  ].freeze
+  ISO8601_TIMESTAMP_PATTERN = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?/
+
+  DEFAULT_CONFIG_FILE = '<%= $custom_queries_file %>'
+  DEFAULT_ROW_LIMIT = <%= $custom_queries_row_limit %>
+  PUPPET_SERVER = '<%= $puppet_server %>'
+
+  SSL_CERT_FILE = '/etc/puppetlabs/puppet/ssl/certs/<%= $puppet_server %>.pem'
+  SSL_KEY_FILE = '/etc/puppetlabs/puppet/ssl/private_keys/<%= $puppet_server %>.pem'
+  SSL_CA_FILE = '/etc/puppetlabs/puppet/ssl/certs/ca.pem'
+
+  def initialize
+    @options = {}
+    @config_file = DEFAULT_CONFIG_FILE
+    @preview_only = false
+    @live_preview_enabled = false
+    parse_arguments
+  end
+
+  attr_reader :config_file
+
+  def preview_only?
+    @preview_only
+  end
+
+  def live_preview?
+    @live_preview_enabled
+  end
+
+  # Collect inputs from flags or interactive prompts
+  def collect_inputs
+    defn = {}
+
+    if flags_provided?
+      defn = collect_from_flags
+    else
+      defn = collect_interactively
+    end
+
+    defn
+  end
+
+  # Validate a definition using the same rules as the runtime engine
+  def validate(defn)
+    errors = validate_single_definition(defn, 0, existing_metric_names)
+    errors
+  end
+
+  # Show placeholder preview of Prometheus exposition output (D-21)
+  def show_preview(defn)
+    puts ''
+    puts '--- Prometheus Exposition Preview ---'
+    puts generate_preview(defn)
+    puts '------------------------------------'
+    puts ''
+  end
+
+  # Show live preview with real PuppetDB data (D-22)
+  def show_live_preview(defn)
+    puts ''
+    puts '--- Live Preview (PuppetDB data) ---'
+    output = live_preview(defn)
+    if output
+      puts output
+    else
+      puts '(no data returned or connection failed)'
+    end
+    puts '------------------------------------'
+    puts ''
+  end
+
+  # Write validated definition to the YAML config file
+  def write_to_config(defn)
+    config = load_existing_config
+
+    # Check for duplicate names
+    existing = config['metrics'].map { |m| m['name'] }
+    if existing.include?(defn['name'])
+      STDERR.puts "ERROR: metric '#{defn['name']}' already exists in #{@config_file}"
+      exit 1
+    end
+
+    config['metrics'] << defn
+    File.write(@config_file, YAML.dump(config))
+  end
+
+  private
+
+  # Parse CLI arguments using OptionParser (D-24)
+  def parse_arguments
+    OptionParser.new do |opts|
+      opts.banner = 'Usage: puppet_custom_metric_builder [options]'
+      opts.separator ''
+      opts.separator 'Build custom metric definitions for the Puppet Data Connector Enhancer.'
+      opts.separator 'Run without flags for interactive mode, or provide flags for scripted use.'
+      opts.separator ''
+
+      opts.on('--name NAME', 'Metric name (must start with puppet_custom_)') do |v|
+        @options[:name] = v
+      end
+
+      opts.on('--endpoint TYPE', VALID_ENDPOINT_TYPES, 'Endpoint type (%s)' % VALID_ENDPOINT_TYPES.join(', ')) do |v|
+        @options[:endpoint] = v
+      end
+
+      opts.on('--type TYPE', VALID_METRIC_TYPES, 'Prometheus metric type (%s)' % VALID_METRIC_TYPES.join(', ')) do |v|
+        @options[:type] = v
+      end
+
+      opts.on('--help-text TEXT', 'HELP string describing the metric') do |v|
+        @options[:help] = v
+      end
+
+      opts.on('--pql-query QUERY', 'PQL query string (for pql endpoint)') do |v|
+        @options[:pql_query] = v
+      end
+
+      opts.on('--fact-name NAME', 'Fact name (for fact endpoint)') do |v|
+        @options[:fact_name] = v
+      end
+
+      opts.on('--resource-type TYPE', 'Resource type (for resource endpoint)') do |v|
+        @options[:resource_type] = v
+      end
+
+      opts.on('--labels LABELS', 'Comma-separated key=path pairs (e.g. certname=certname,os=facts.os.name)') do |v|
+        @options[:labels] = parse_label_string(v)
+      end
+
+      opts.on('--value-path PATH', 'Dot-path to numeric value field') do |v|
+        @options[:value_field] = v
+      end
+
+      opts.on('--row-limit N', Integer, 'Per-metric row limit (default: %d, 0 for unlimited)' % DEFAULT_ROW_LIMIT) do |v|
+        @options[:row_limit] = v
+      end
+
+      opts.on('--filter FILTER', 'PuppetDB query filter') do |v|
+        @options[:filter] = v
+      end
+
+      opts.on('--preview-only', 'Show preview without writing to file') do
+        @preview_only = true
+      end
+
+      opts.on('--live-preview', 'Query PuppetDB for real sample data') do
+        @live_preview_enabled = true
+      end
+
+      opts.on('--config-file PATH', 'YAML config file path (default: %s)' % DEFAULT_CONFIG_FILE) do |v|
+        @config_file = v
+      end
+    end.parse!
+  end
+
+  # Check whether enough flags were provided to skip interactive mode
+  def flags_provided?
+    %i[name endpoint type help].all? { |k| @options.key?(k) }
+  end
+
+  # Build definition from command-line flags
+  def collect_from_flags
+    defn = {
+      'name' => @options[:name],
+      'endpoint' => @options[:endpoint],
+      'type' => @options[:type],
+      'help' => @options[:help],
+    }
+
+    defn['pql_query'] = @options[:pql_query] if @options[:pql_query]
+    defn['fact_name'] = @options[:fact_name] if @options[:fact_name]
+    defn['resource_type'] = @options[:resource_type] if @options[:resource_type]
+    defn['labels'] = @options[:labels] if @options[:labels]
+    defn['value_field'] = @options[:value_field] if @options[:value_field]
+    defn['row_limit'] = @options[:row_limit] if @options[:row_limit]
+    defn['filter'] = @options[:filter] if @options[:filter]
+
+    defn
+  end
+
+  # Build definition interactively by prompting for each field (D-24)
+  def collect_interactively
+    puts 'Custom Metric Builder - Interactive Mode'
+    puts '========================================='
+    puts ''
+
+    defn = {}
+
+    # 1. Metric name
+    defn['name'] = prompt_with_validation('Metric name (must start with puppet_custom_)') do |input|
+      errors = []
+      errors << 'name cannot be empty' if input.strip.empty?
+      errors << 'must start with puppet_custom_ prefix' unless input.start_with?('puppet_custom_')
+      errors << 'invalid metric name (must match /^[a-z][a-z0-9_]*$/)' unless input.match?(PROMETHEUS_NAME_PATTERN)
+      errors << 'collides with built-in metric name' if BUILTIN_METRIC_PREFIXES.include?(input)
+      errors
+    end
+
+    # 2. Endpoint type
+    defn['endpoint'] = prompt_numbered_choice('Endpoint type', VALID_ENDPOINT_TYPES)
+
+    # 3. Endpoint-specific fields
+    case defn['endpoint']
+    when 'pql'
+      defn['pql_query'] = prompt_with_validation('PQL query') do |input|
+        validate_pql_query(input, 'Input', defn['name'])
+      end
+    when 'fact'
+      defn['fact_name'] = prompt_simple('Fact name')
+    when 'resource'
+      defn['resource_type'] = prompt_simple('Resource type (e.g. Package, Service)')
+    end
+
+    # 4. Prometheus metric type
+    defn['type'] = prompt_numbered_choice('Prometheus metric type', VALID_METRIC_TYPES)
+
+    # 5. HELP text
+    defn['help'] = prompt_simple('HELP description for this metric')
+
+    # 6. Labels
+    defn['labels'] = prompt_labels
+
+    # 7. Value field path
+    value_field = prompt_optional('Value field dot-path (leave empty for count-style metrics)')
+    defn['value_field'] = value_field unless value_field.nil?
+
+    # 8. Row limit
+    row_limit_input = prompt_optional('Row limit (default: %d, 0 for unlimited)' % DEFAULT_ROW_LIMIT)
+    if row_limit_input
+      defn['row_limit'] = row_limit_input.to_i
+    end
+
+    # 9. Filter
+    filter = prompt_optional('PuppetDB query filter (optional)')
+    defn['filter'] = filter unless filter.nil?
+
+    defn
+  end
+
+  # Prompt for a value, validate it, re-prompt on errors
+  def prompt_with_validation(prompt_text)
+    loop do
+      print "#{prompt_text}: "
+      input = STDIN.gets&.chomp
+      abort("\nAborted.") if input.nil?
+
+      errors = yield(input)
+      if errors.empty?
+        return input
+      else
+        errors.each { |e| STDERR.puts "  ERROR: #{e}" }
+      end
+    end
+  end
+
+  # Prompt with numbered choices
+  def prompt_numbered_choice(prompt_text, choices)
+    puts "#{prompt_text}:"
+    choices.each_with_index do |choice, idx|
+      puts "  #{idx + 1}. #{choice}"
+    end
+
+    loop do
+      print 'Select [1-%d]: ' % choices.length
+      input = STDIN.gets&.chomp
+      abort("\nAborted.") if input.nil?
+
+      idx = input.to_i - 1
+      if idx >= 0 && idx < choices.length
+        return choices[idx]
+      else
+        STDERR.puts '  ERROR: invalid selection'
+      end
+    end
+  end
+
+  # Simple prompt, must be non-empty
+  def prompt_simple(prompt_text)
+    loop do
+      print "#{prompt_text}: "
+      input = STDIN.gets&.chomp
+      abort("\nAborted.") if input.nil?
+
+      return input unless input.strip.empty?
+
+      STDERR.puts '  ERROR: value cannot be empty'
+    end
+  end
+
+  # Prompt for an optional value, returns nil if empty
+  def prompt_optional(prompt_text)
+    print "#{prompt_text}: "
+    input = STDIN.gets&.chomp
+    return nil if input.nil? || input.strip.empty?
+
+    input.strip
+  end
+
+  # Prompt for label key=path pairs
+  def prompt_labels
+    print 'Add labels? [y/N]: '
+    answer = STDIN.gets&.chomp
+    return nil if answer.nil? || !answer.strip.downcase.start_with?('y')
+
+    labels = {}
+    puts 'Enter labels as key=path pairs. Empty line to finish.'
+
+    loop do
+      print '  Label (key=path): '
+      input = STDIN.gets&.chomp
+      break if input.nil? || input.strip.empty?
+
+      parts = input.strip.split('=', 2)
+      if parts.length != 2 || parts.any? { |p| p.strip.empty? }
+        STDERR.puts '    ERROR: format must be key=path'
+        next
+      end
+
+      key = parts[0].strip
+      path = parts[1].strip
+
+      unless key.match?(PROMETHEUS_LABEL_PATTERN) && !key.start_with?('__')
+        STDERR.puts '    ERROR: invalid label name (lowercase, underscores, no __ prefix)'
+        next
+      end
+
+      labels[key] = path
+    end
+
+    labels.empty? ? nil : labels
+  end
+
+  # Parse a label string from --labels flag (key=path,key=path)
+  def parse_label_string(label_str)
+    labels = {}
+    label_str.split(',').each do |pair|
+      parts = pair.strip.split('=', 2)
+      next unless parts.length == 2
+
+      labels[parts[0].strip] = parts[1].strip
+    end
+    labels.empty? ? nil : labels
+  end
+
+  # Generate placeholder preview of Prometheus output (D-21)
+  def generate_preview(defn)
+    lines = []
+    name = defn['name']
+    lines << '# HELP %s %s' % [name, defn['help']]
+    lines << '# TYPE %s %s' % [name, defn['type']]
+
+    if defn['labels'].is_a?(Hash) && !defn['labels'].empty?
+      label_str = defn['labels'].keys.map { |k| '%s="<%s>"' % [k, k] }.join(',')
+      2.times { lines << '%s{%s} <value>' % [name, label_str] }
+    else
+      2.times { lines << '%s <value>' % name }
+    end
+
+    lines.join("\n")
+  end
+
+  # Fetch live data from PuppetDB and render a realistic preview (D-22)
+  def live_preview(defn)
+    data = fetch_sample_data(defn)
+    return nil if data.nil? || data.empty?
+
+    lines = []
+    name = defn['name']
+    lines << '# HELP %s %s' % [name, defn['help']]
+    lines << '# TYPE %s %s' % [name, defn['type']]
+
+    data.each do |row|
+      if defn['labels'].is_a?(Hash) && !defn['labels'].empty?
+        label_values = defn['labels'].map do |key, path|
+          value = resolve_json_path(row, path)
+          '%s="%s"' % [key, value.to_s.gsub('"', '\\"')]
+        end
+        metric_value = defn['value_field'] ? resolve_json_path(row, defn['value_field']) : 1
+        lines << '%s{%s} %s' % [name, label_values.join(','), metric_value]
+      else
+        metric_value = defn['value_field'] ? resolve_json_path(row, defn['value_field']) : 1
+        lines << '%s %s' % [name, metric_value]
+      end
+    end
+
+    lines.join("\n")
+  rescue StandardError => e
+    STDERR.puts "Live preview failed: #{e.message}"
+    nil
+  end
+
+  # Fetch sample data from PuppetDB for live preview
+  def fetch_sample_data(defn)
+    case defn['endpoint']
+    when 'pql'
+      query = sanitise_pql_timestamp(defn['pql_query'], defn['name'])
+      fetch_puppetdb_pql(query, 3)
+    when 'fact'
+      fetch_puppetdb_facts(defn['fact_name'], 3)
+    when 'resource'
+      fetch_puppetdb_resources(defn['resource_type'], 3)
+    when 'inventory'
+      fetch_puppetdb_inventory(3)
+    when 'nodes'
+      fetch_puppetdb_nodes(3)
+    end
+  end
+
+  # PuppetDB HTTPS request with SSL client cert auth
+  def fetch_from_puppetdb(path, params = {})
+    uri = URI("https://#{PUPPET_SERVER}:8081#{path}")
+    uri.query = URI.encode_www_form(params) unless params.empty?
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.open_timeout = 10
+    http.read_timeout = 10
+    http.use_ssl = true
+    http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+    http.cert = OpenSSL::X509::Certificate.new(File.read(SSL_CERT_FILE))
+    http.key = OpenSSL::PKey::RSA.new(File.read(SSL_KEY_FILE))
+    http.ca_file = SSL_CA_FILE
+
+    request = Net::HTTP::Get.new(uri.request_uri)
+    request['User-Agent'] = 'puppet-custom-metric-builder/1.0'
+
+    response = http.request(request)
+
+    unless response.is_a?(Net::HTTPSuccess)
+      STDERR.puts "PuppetDB request failed: HTTP #{response.code} #{response.message}"
+      return nil
+    end
+
+    JSON.parse(response.body)
+  rescue Errno::ECONNREFUSED
+    STDERR.puts 'Connection refused to PuppetDB at %s:8081' % PUPPET_SERVER
+    nil
+  rescue OpenSSL::SSL::SSLError => e
+    STDERR.puts 'SSL error connecting to PuppetDB: %s' % e.message
+    nil
+  rescue StandardError => e
+    STDERR.puts 'PuppetDB connection error: %s' % e.message
+    nil
+  end
+
+  # PQL query endpoint
+  def fetch_puppetdb_pql(query, limit)
+    limited_query = query.strip
+    limited_query += ' limit %d' % limit unless limited_query.match?(%r{\blimit\s+\d+}i)
+    fetch_from_puppetdb('/pdb/query/v4', query: limited_query)
+  end
+
+  # Facts endpoint
+  def fetch_puppetdb_facts(fact_name, limit)
+    fetch_from_puppetdb('/pdb/query/v4/facts/%s' % fact_name, limit: limit)
+  end
+
+  # Resources endpoint
+  def fetch_puppetdb_resources(resource_type, limit)
+    fetch_from_puppetdb('/pdb/query/v4/resources/%s' % resource_type, limit: limit)
+  end
+
+  # Inventory endpoint
+  def fetch_puppetdb_inventory(limit)
+    fetch_from_puppetdb('/pdb/query/v4/inventory', limit: limit)
+  end
+
+  # Nodes endpoint
+  def fetch_puppetdb_nodes(limit)
+    fetch_from_puppetdb('/pdb/query/v4/nodes', limit: limit)
+  end
+
+  # Navigate a dot-path into a nested hash/array
+  def resolve_json_path(data, path)
+    return data if path.nil? || path.empty?
+
+    parts = path.split('.')
+    current = data
+
+    parts.each do |part|
+      case current
+      when Hash
+        current = current[part]
+      when Array
+        idx = Integer(part, exception: false)
+        current = idx ? current[idx] : nil
+      else
+        return nil
+      end
+    end
+
+    current
+  end
+
+  # Load existing YAML config or create empty structure
+  def load_existing_config
+    if File.exist?(@config_file)
+      content = YAML.safe_load(File.read(@config_file), permitted_classes: []) || {}
+      content['metrics'] ||= []
+      content
+    else
+      { 'metrics' => [] }
+    end
+  end
+
+  # Return Set of existing metric names from the config file
+  def existing_metric_names
+    config = load_existing_config
+    Set.new(config['metrics'].map { |m| m['name'] })
+  end
+
+  # -------------------------------------------------------
+  # Validation methods — identical to the runtime engine
+  # -------------------------------------------------------
+
+  # Validate a single metric definition against schema, naming, and safety rules
+  def validate_single_definition(defn, index, seen_names)
+    errors = []
+    label = 'Custom metric definition #%d' % [index + 1]
+
+    # Schema validation: required fields (D-02)
+    %w[name endpoint type help].each do |field|
+      errors << '%s: missing required field \'%s\'' % [label, field] unless defn[field] && !defn[field].to_s.strip.empty?
+    end
+    return errors unless errors.empty?
+
+    name = defn['name']
+
+    # Prometheus naming rules (D-09)
+    unless name.match?(PROMETHEUS_NAME_PATTERN)
+      errors << '%s \'%s\': invalid metric name (must match /^[a-z][a-z0-9_]*$/)' % [label, name]
+    end
+
+    # Prefix enforcement (D-06)
+    unless name.start_with?('puppet_custom_')
+      errors << '%s \'%s\': must start with \'puppet_custom_\' prefix' % [label, name]
+    end
+
+    # Built-in collision detection (D-06)
+    if BUILTIN_METRIC_PREFIXES.include?(name)
+      errors << '%s \'%s\': collides with built-in metric name' % [label, name]
+    end
+
+    # Duplicate detection (D-07)
+    if seen_names.include?(name)
+      errors << '%s \'%s\': duplicate metric name (already defined)' % [label, name]
+    end
+
+    # Endpoint type validation (D-03)
+    unless VALID_ENDPOINT_TYPES.include?(defn['endpoint'])
+      errors << '%s \'%s\': unknown endpoint \'%s\' (valid: %s)' % [label, name, defn['endpoint'], VALID_ENDPOINT_TYPES.join(', ')]
+    end
+
+    # Endpoint-specific field validation (D-02)
+    case defn['endpoint']
+    when 'fact'
+      errors << '%s \'%s\': fact endpoint requires \'fact_name\'' % [label, name] unless defn['fact_name']
+    when 'pql'
+      errors << '%s \'%s\': pql endpoint requires \'pql_query\'' % [label, name] unless defn['pql_query']
+      errors.concat(validate_pql_query(defn['pql_query'], label, name)) if defn['pql_query']
+    when 'resource'
+      errors << '%s \'%s\': resource endpoint requires \'resource_type\'' % [label, name] unless defn['resource_type']
+    end
+
+    # Prometheus type validation
+    unless VALID_METRIC_TYPES.include?(defn['type'])
+      errors << '%s \'%s\': invalid metric type \'%s\' (valid: %s)' % [label, name, defn['type'], VALID_METRIC_TYPES.join(', ')]
+    end
+
+    # Label name validation (D-10)
+    if defn['labels'].is_a?(Hash)
+      defn['labels'].each_key do |label_name|
+        unless label_name.match?(PROMETHEUS_LABEL_PATTERN) && !label_name.start_with?('__')
+          errors << '%s \'%s\': invalid label name \'%s\'' % [label, name, label_name]
+        end
+      end
+    end
+
+    # Value field and label path validation (CUST-06)
+    if defn['value_field'] && defn['value_field'].to_s.strip.empty?
+      errors << '%s \'%s\': value_field must be a non-empty string' % [label, name]
+    end
+
+    if defn['labels'].is_a?(Hash)
+      defn['labels'].each do |lbl_name, lbl_path|
+        if lbl_path.to_s.strip.empty?
+          errors << '%s \'%s\': label \'%s\' path must be a non-empty string' % [label, name, lbl_name]
+        end
+      end
+    end
+
+    errors
+  end
+
+  # Validate PQL query for safety issues (D-16, D-17)
+  def validate_pql_query(query, label, name)
+    errors = []
+
+    # Empty string check (D-16)
+    if query.strip.empty?
+      errors << '%s \'%s\': pql_query cannot be empty' % [label, name]
+      return errors
+    end
+
+    # Unbalanced quotes (D-16)
+    if query.count('"').odd? || query.count("'").odd?
+      errors << '%s \'%s\': pql_query has unbalanced quotes' % [label, name]
+    end
+
+    # Dangerous patterns (D-17)
+    DANGEROUS_PQL_PATTERNS.each do |pattern|
+      if query.match?(pattern)
+        errors << '%s \'%s\': pql_query contains suspicious pattern \'%s\'' % [label, name, pattern.source]
+      end
+    end
+
+    errors
+  end
+
+  # Strip hardcoded ISO8601 timestamps from PQL queries (D-18)
+  def sanitise_pql_timestamp(query, name)
+    if query.match?(ISO8601_TIMESTAMP_PATTERN)
+      STDERR.puts(
+        "Warning: metric '%s' PQL query contains hardcoded timestamp " \
+        '(likely pasted from chatbot). Stripping timestamp comparison.' % name,
+      )
+      sanitised = query.gsub(
+        /\s+and\s+\w+_timestamp\s*[<>=!]+\s*"[^"]*"/i,
+        '',
+      )
+      sanitised.strip
+    else
+      query
+    end
+  end
+end
+
+# -------------------------------------------------------
+# Main entry point
+# -------------------------------------------------------
+builder = CustomMetricBuilder.new
+defn = builder.collect_inputs
+
+errors = builder.validate(defn)
+if errors.any?
+  errors.each { |e| STDERR.puts "ERROR: #{e}" }
+  exit 1
+end
+
+builder.show_preview(defn)
+builder.show_live_preview(defn) if builder.live_preview?
+
+unless builder.preview_only?
+  builder.write_to_config(defn)
+  puts 'Metric definition written to %s' % builder.config_file
+end
