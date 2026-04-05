@@ -5,3 +5,7 @@ fixtures:
   forge_modules:
     stdlib: "puppetlabs/stdlib"
     systemd: "puppet/systemd"
+  symlinks:
+    # Premium PE module stub: provides the class declaration needed by
+    # pre_condition without requiring the licensed module in CI.
+    puppet_data_connector: "../../stubs/puppet_data_connector"
