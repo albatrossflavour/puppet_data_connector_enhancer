@@ -34,6 +34,10 @@ Users can turn any PQL query into an ongoing Prometheus metric with a matching G
 - [ ] Test coverage for error scenarios (bad YAML, missing config, API failures)
 - [ ] Test coverage for orchestrator and classification metrics
 - [ ] Merge feature/orchestrator-metrics branch work
+- [ ] Self-monitoring metrics: collection script resource usage (CPU, memory, wall time)
+- [ ] Self-monitoring metrics: API call counts and durations per endpoint (PuppetDB, Orchestrator, Classifier)
+- [ ] Self-monitoring metrics: collection health (success/failure rates, timeouts, error counts per run)
+- [ ] Self-monitoring metrics: total metrics collected per run
 
 ### Out of Scope
 
