@@ -1,0 +1,37 @@
+<%- | Array $metrics | -%>
+---
+metrics:
+<% $metrics.each |$metric| { -%>
+  - name: "<%= $metric['name'] %>"
+    type: "<%= $metric['type'] %>"
+    help: "<%= $metric['help'] %>"
+    endpoint: "<%= $metric['endpoint'] %>"
+<% if $metric['fact_name'] { -%>
+    fact_name: "<%= $metric['fact_name'] %>"
+<% } -%>
+<% if $metric['pql_query'] { -%>
+    pql_query: "<%= $metric['pql_query'] %>"
+<% } -%>
+<% if $metric['resource_type'] { -%>
+    resource_type: "<%= $metric['resource_type'] %>"
+<% } -%>
+<% if $metric['resource_title'] { -%>
+    resource_title: "<%= $metric['resource_title'] %>"
+<% } -%>
+<% if $metric['labels'] { -%>
+    labels:
+<%   $metric['labels'].each |$label_name, $label_path| { -%>
+      <%= $label_name %>: "<%= $label_path %>"
+<%   } -%>
+<% } -%>
+<% if $metric['value_field'] { -%>
+    value_field: "<%= $metric['value_field'] %>"
+<% } else { -%>
+    value_field: null
+<% } -%>
+<% if $metric['filter'] { -%>
+    filter: "<%= $metric['filter'] %>"
+<% } else { -%>
+    filter: null
+<% } -%>
+<% } -%>

@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Custom Metrics System**: YAML-driven extension layer for user-defined PuppetDB metrics
+  - New `custom_queries` parameter accepts an array of metric definition hashes
+  - New `custom_queries_file` parameter to override the YAML config file path
+  - Supports four PuppetDB endpoint types: `fact`, `pql`, `resource`, `inventory`
+  - Dot-path notation for extracting nested JSON values as Prometheus labels
+  - Per-metric error isolation - broken custom metrics cannot affect built-in metrics
+  - Automatic HELP/TYPE header generation for custom metrics
+  - ENV override (`CUSTOM_QUERIES_FILE`) for testing without Puppet
+  - YAML config parsed with `YAML.safe_load` (no arbitrary code execution)
+- **Claude Code Workflow**: Custom metrics authoring workflow documented in CLAUDE.md
+  - Step-by-step guide for designing PuppetDB queries and Prometheus mappings
+  - YAML field reference table and JSON path notation guide
+  - Example PuppetDB curl commands for each endpoint type
+
 ## [1.3.0] - 2025-10-03
 
 ### Fixed

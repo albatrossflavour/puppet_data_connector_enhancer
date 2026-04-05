@@ -331,6 +331,147 @@ describe 'puppet_data_connector_enhancer' do
         end
       end
 
+      context 'with custom_queries parameter' do
+        let(:params) do
+          super().merge(
+            'custom_queries' => [
+              {
+                'name'       => 'puppet_custom_nginx_version',
+                'type'       => 'gauge',
+                'help'       => 'Nginx version per node',
+                'endpoint'   => 'fact',
+                'fact_name'  => 'packages',
+                'labels'     => {
+                  'node'        => 'certname',
+                  'environment' => 'environment',
+                  'version'     => 'value.nginx.version',
+                },
+              },
+            ],
+          )
+        end
+
+        it { is_expected.to compile.with_all_deps }
+
+        it 'creates custom queries YAML file' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/custom_queries.yaml')
+            .with_ensure('file')
+            .with_mode('0644')
+            .with_owner('pe-puppet')
+            .with_group('pe-puppet')
+        end
+
+        it 'renders YAML with metric name' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/custom_queries.yaml')
+            .with_content(%r{name: "puppet_custom_nginx_version"})
+        end
+
+        it 'renders YAML with endpoint type' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/custom_queries.yaml')
+            .with_content(%r{endpoint: "fact"})
+        end
+
+        it 'renders YAML with fact_name' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/custom_queries.yaml')
+            .with_content(%r{fact_name: "packages"})
+        end
+
+        it 'passes custom_queries_file to script template' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{custom_queries\.yaml})
+        end
+
+        it 'includes require yaml in script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{require 'yaml'})
+        end
+
+        it 'includes collect_custom_metrics method in script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{def collect_custom_metrics})
+        end
+      end
+
+      context 'with empty custom_queries array' do
+        let(:params) do
+          super().merge(
+            'custom_queries' => [],
+          )
+        end
+
+        it { is_expected.to compile.with_all_deps }
+
+        it 'creates custom queries file with empty metrics' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/custom_queries.yaml')
+            .with_ensure('file')
+            .with_content(%r{^---\nmetrics:\n$})
+        end
+      end
+
+      context 'without custom_queries parameter' do
+        it { is_expected.to compile.with_all_deps }
+
+        it 'ensures custom queries file is absent' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/custom_queries.yaml')
+            .with_ensure('absent')
+        end
+      end
+
+      context 'with custom custom_queries_file path' do
+        let(:params) do
+          super().merge(
+            'custom_queries' => [
+              {
+                'name'     => 'puppet_custom_test',
+                'type'     => 'gauge',
+                'help'     => 'Test metric',
+                'endpoint' => 'pql',
+                'pql_query' => 'nodes { }',
+              },
+            ],
+            'custom_queries_file' => '/etc/puppet/custom_queries.yaml',
+          )
+        end
+
+        it { is_expected.to compile.with_all_deps }
+
+        it 'creates custom queries file at specified path' do
+          is_expected.to contain_file('/etc/puppet/custom_queries.yaml')
+            .with_ensure('file')
+        end
+
+        it 'passes custom path to script template' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{/etc/puppet/custom_queries\.yaml})
+        end
+      end
+
+      context 'custom queries resource ordering' do
+        let(:params) do
+          super().merge(
+            'custom_queries' => [
+              {
+                'name'     => 'puppet_custom_test',
+                'type'     => 'gauge',
+                'help'     => 'Test metric',
+                'endpoint' => 'fact',
+                'fact_name' => 'os',
+              },
+            ],
+          )
+        end
+
+        it 'ensures custom queries file is created before script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .that_requires('File[/opt/puppetlabs/puppet_data_connector_enhancer/custom_queries.yaml]')
+        end
+
+        it 'ensures base directory is created before custom queries file' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/custom_queries.yaml')
+            .that_requires('File[/opt/puppetlabs/puppet_data_connector_enhancer]')
+        end
+      end
+
       context 'resource ordering' do
         it 'ensures base directory is created before script' do
           is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
