@@ -512,17 +512,17 @@ end
 | A2 | PuppetDB returns clear error messages for invalid PQL | Don't Hand-Roll | If PQL errors are opaque, users get poor feedback. Mitigation: wrap in error handler with context. |
 | A3 | `limit` HTTP parameter takes precedence when PQL also has `limit` clause | Pitfall 1 | Double-limiting could behave unexpectedly. Mitigation: Ruby-side truncation as safety net. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Prometheus metric type validation scope**
+1. **Prometheus metric type validation scope** — RESOLVED
    - What we know: Common types are gauge, counter, histogram, summary, untyped
    - What is unclear: Whether to allow histogram and summary since the module only emits simple gauge/counter style metrics
-   - Recommendation: Allow all valid Prometheus types in validation but note that only gauge and counter produce meaningful output from this module
+   - Resolution: Allow all valid Prometheus types in validation. Only gauge and counter produce meaningful output from this module, but rejecting valid types would be unnecessarily restrictive.
 
-2. **Row limit interaction with PQL limit clauses**
+2. **Row limit interaction with PQL limit clauses** — RESOLVED
    - What we know: PuppetDB supports both HTTP `limit` parameter and PQL `limit` clause
    - What is unclear: Exact precedence when both are present
-   - Recommendation: Use HTTP `limit` parameter only (do not modify user PQL). Apply Ruby-side truncation as belt-and-braces.
+   - Resolution: Use HTTP `limit` parameter only (do not modify user PQL). Apply Ruby-side truncation as belt-and-braces safety net. This avoids the precedence question entirely.
 
 ## Sources
 
