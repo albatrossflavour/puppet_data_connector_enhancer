@@ -12,3 +12,10 @@ puppet_data_connector_enhancer::scm_max_wait_time: 900    # Maximum wait time (1
 
 # Custom Metrics (optional - disabled by default)
 puppet_data_connector_enhancer::custom_queries: ~
+
+# PE Orchestrator Metrics (optional - disabled by default)
+puppet_data_connector_enhancer::enable_orchestrator_metrics: false
+puppet_data_connector_enhancer::orchestrator_jobs_limit: 50
+
+# Node Group Classification Metrics (optional - disabled by default)
+puppet_data_connector_enhancer::enable_classification_metrics: false
