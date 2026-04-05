@@ -87,41 +87,41 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ORCH-01 | Pending | Pending |
-| ORCH-02 | Pending | Pending |
-| ORCH-03 | Pending | Pending |
-| ORCH-04 | Pending | Pending |
-| ORCH-05 | Pending | Pending |
-| CUST-01 | Pending | Pending |
-| CUST-02 | Pending | Pending |
-| CUST-03 | Pending | Pending |
-| CUST-04 | Pending | Pending |
-| CUST-05 | Pending | Pending |
-| CUST-06 | Pending | Pending |
-| GRAF-01 | Pending | Pending |
-| GRAF-02 | Pending | Pending |
-| GRAF-03 | Pending | Pending |
-| GRAF-04 | Pending | Pending |
-| SMON-01 | Pending | Pending |
-| SMON-02 | Pending | Pending |
-| SMON-03 | Pending | Pending |
-| SMON-04 | Pending | Pending |
-| DOCS-01 | Pending | Pending |
-| DOCS-02 | Pending | Pending |
-| DOCS-03 | Pending | Pending |
-| DOCS-04 | Pending | Pending |
-| TEST-01 | Pending | Pending |
-| TEST-02 | Pending | Pending |
-| TEST-03 | Pending | Pending |
-| TEST-04 | Pending | Pending |
+| ORCH-01 | Phase 1 | Pending |
+| ORCH-02 | Phase 1 | Pending |
+| ORCH-03 | Phase 1 | Pending |
+| ORCH-04 | Phase 1 | Pending |
+| ORCH-05 | Phase 1 | Pending |
+| CUST-01 | Phase 2 | Pending |
+| CUST-02 | Phase 2 | Pending |
+| CUST-03 | Phase 2 | Pending |
+| CUST-04 | Phase 2 | Pending |
+| CUST-05 | Phase 2 | Pending |
+| CUST-06 | Phase 2 | Pending |
+| GRAF-01 | Phase 3 | Pending |
+| GRAF-02 | Phase 3 | Pending |
+| GRAF-03 | Phase 3 | Pending |
+| GRAF-04 | Phase 3 | Pending |
+| SMON-01 | Phase 3 | Pending |
+| SMON-02 | Phase 3 | Pending |
+| SMON-03 | Phase 3 | Pending |
+| SMON-04 | Phase 3 | Pending |
+| DOCS-01 | Phase 4 | Pending |
+| DOCS-02 | Phase 4 | Pending |
+| DOCS-03 | Phase 4 | Pending |
+| DOCS-04 | Phase 4 | Pending |
+| TEST-01 | Phase 2 | Pending |
+| TEST-02 | Phase 1 | Pending |
+| TEST-03 | Phase 3 | Pending |
+| TEST-04 | Phase 3 | Pending |
 
 **Coverage:**
 
 - v1 requirements: 27 total
-- Mapped to phases: 0
-- Unmapped: 27
+- Mapped to phases: 27
+- Unmapped: 0
 
 ---
 
 *Requirements defined: 2026-04-05*
-*Last updated: 2026-04-05 after initial definition*
+*Last updated: 2026-04-05 after roadmap creation*
