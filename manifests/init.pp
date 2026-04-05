@@ -275,6 +275,20 @@ class puppet_data_connector_enhancer (
     require => [Class['puppet_data_connector'], File[$scm_dir], File[$_custom_queries_file]],
   }
 
+  # Install the custom metric builder CLI tool
+  file { "${scm_dir}/puppet_custom_metric_builder":
+    ensure  => $ensure,
+    content => epp('puppet_data_connector_enhancer/puppet_custom_metric_builder.epp', {
+        'custom_queries_file'      => $_custom_queries_file,
+        'puppet_server'            => pick_default($puppet_server, ''),
+        'custom_queries_row_limit' => $custom_queries_row_limit,
+    }),
+    mode    => '0755',
+    owner   => 'pe-puppet',
+    group   => 'pe-puppet',
+    require => File[$scm_dir],
+  }
+
   # Create systemd service and timer for scheduled execution
   if $ensure == 'present' and $timer_ensure == 'present' {
     systemd::unit_file { 'puppet-data-connector-enhancer.service':
