@@ -591,6 +591,160 @@ describe 'puppet_data_connector_enhancer' do
             .that_requires('Systemd::Unit_file[puppet-data-connector-enhancer.service]')
         end
       end
+
+      context 'with custom_queries_row_limit parameter' do
+        let(:params) do
+          super().merge(
+            'custom_queries_row_limit' => 1000,
+          )
+        end
+
+        it { is_expected.to compile.with_all_deps }
+
+        it 'passes row limit to generated script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{custom_queries_row_limit:.*1000})
+        end
+      end
+
+      context 'with custom_queries_row_limit set to zero (unlimited)' do
+        let(:params) do
+          super().merge(
+            'custom_queries_row_limit' => 0,
+          )
+        end
+
+        it { is_expected.to compile.with_all_deps }
+
+        it 'passes zero row limit to generated script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{custom_queries_row_limit:.*0})
+        end
+      end
+
+      context 'generated script validation engine' do
+        it 'contains validation method' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{def validate_custom_metric_definitions})
+        end
+
+        it 'contains built-in metric prefix registry' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{BUILTIN_METRIC_PREFIXES})
+        end
+
+        it 'contains PQL sanitisation method' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{def validate_pql_query})
+        end
+
+        it 'contains timestamp sanitisation method' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{def sanitise_pql_timestamp})
+        end
+
+        it 'contains nodes endpoint type' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{when 'nodes'})
+        end
+
+        it 'contains dangerous PQL patterns constant' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{DANGEROUS_PQL_PATTERNS})
+        end
+
+        it 'contains puppet_custom_ prefix enforcement' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{puppet_custom_})
+        end
+
+        it 'contains row limit enforcement in fetch method' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{params\['limit'\]})
+        end
+      end
+
+      context 'CLI metric builder tool' do
+        it 'deploys the CLI tool script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_custom_metric_builder')
+            .with_ensure('present')
+            .with_mode('0755')
+            .with_owner('pe-puppet')
+            .with_group('pe-puppet')
+        end
+
+        it 'generates CLI tool with correct shebang' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_custom_metric_builder')
+            .with_content(%r{#!/opt/puppetlabs/puppet/bin/ruby})
+        end
+
+        it 'generates CLI tool with validation logic' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_custom_metric_builder')
+            .with_content(%r{class CustomMetricBuilder})
+        end
+
+        it 'generates CLI tool with OptionParser' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_custom_metric_builder')
+            .with_content(%r{OptionParser})
+        end
+
+        it 'generates CLI tool with same validation constants' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_custom_metric_builder')
+            .with_content(%r{BUILTIN_METRIC_PREFIXES})
+        end
+      end
+
+      context 'CLI tool when ensure is absent' do
+        let(:params) do
+          super().merge(
+            'ensure' => 'absent',
+          )
+        end
+
+        it 'removes the CLI tool' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_custom_metric_builder')
+            .with_ensure('absent')
+        end
+      end
+
+      context 'with custom queries file path (CUST-05 EPP escaping avoidance)' do
+        let(:params) do
+          super().merge(
+            'custom_queries_file' => '/etc/puppetlabs/custom_metrics.yaml',
+          )
+        end
+
+        it { is_expected.to compile.with_all_deps }
+
+        it 'passes custom queries file path to generated script' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/puppet_data_connector_enhancer')
+            .with_content(%r{custom_queries_file.*'/etc/puppetlabs/custom_metrics\.yaml'})
+        end
+      end
+
+      context 'with custom_queries inline parameter (CUST-05)' do
+        let(:params) do
+          super().merge(
+            'custom_queries' => [
+              {
+                'name'     => 'puppet_custom_test',
+                'endpoint' => 'fact',
+                'type'     => 'gauge',
+                'help'     => 'Test metric',
+                'fact_name' => 'os',
+              },
+            ],
+          )
+        end
+
+        it { is_expected.to compile.with_all_deps }
+
+        it 'creates the custom queries YAML file' do
+          is_expected.to contain_file('/opt/puppetlabs/puppet_data_connector_enhancer/custom_queries.yaml')
+            .with_ensure('file')
+            .with_content(%r{name: "puppet_custom_test"})
+        end
+      end
     end
   end
 end

@@ -426,7 +426,7 @@ class CustomMetricBuilder
     lines << '# TYPE %s %s' % [name, defn['type']]
 
     if defn['labels'].is_a?(Hash) && !defn['labels'].empty?
-      label_str = defn['labels'].keys.map { |k| '%s="<%s>"' % [k, k] }.join(',')
+      label_str = defn['labels'].keys.map { |k| '%s="<%%s>"' % [k, k] }.join(',')
       2.times { lines << '%s{%s} <value>' % [name, label_str] }
     else
       2.times { lines << '%s <value>' % name }
