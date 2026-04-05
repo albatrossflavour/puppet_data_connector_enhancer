@@ -51,6 +51,60 @@ class PrometheusMetricsGenerator
     @start_time = Time.now.to_f
   end
 
+  # Built-in metric name registry for collision detection (D-08)
+  BUILTIN_METRIC_PREFIXES = Set.new([
+    'puppet_configuration_version',
+    'puppet_node_count',
+    'puppet_state_overview',
+    'puppet_node_os',
+    'puppet_node_os_count',
+    'puppet_infra_assistant_tokens_total',
+    'puppet_node_trusted',
+    'puppet_patch_run',
+    'puppet_restart_required',
+    'puppet_patching_data',
+    'puppet_patching_blocked',
+    'puppet_patching_group',
+    'puppet_patching_stats',
+    'puppet_patching_groups',
+    'puppet_cis_compliance_score',
+    'puppet_scm_export_success',
+    'puppet_scm_export_last_run_timestamp',
+    'puppet_scm_export_last_success_timestamp',
+    'puppet_scm_export_duration_seconds',
+    'puppet_scm_export_nodes_count',
+    'puppet_scm_export_info',
+    'puppet_infrastructure_config',
+    'puppet_exporter_collection_failed',
+    'puppet_exporter_scrape_duration_seconds',
+    'puppet_exporter_scrape_success',
+    'puppet_exporter_last_scrape_timestamp',
+    'puppet_orchestrator_job_info',
+    'puppet_orchestrator_job_duration_seconds',
+    'puppet_orchestrator_job_start_timestamp',
+    'puppet_orchestrator_job_node_count',
+    'puppet_orchestrator_job_status_total',
+    'puppet_orchestrator_plan_info',
+    'puppet_orchestrator_plan_duration_seconds',
+    'puppet_orchestrator_plan_start_timestamp',
+    'puppet_orchestrator_plan_status_total',
+    'puppet_node_group_info',
+    'puppet_node_group_edge',
+    'puppet_class_usage_total',
+  ]).freeze
+
+  VALID_ENDPOINT_TYPES = %w[fact pql resource inventory nodes].freeze
+  VALID_METRIC_TYPES = %w[gauge counter histogram summary untyped].freeze
+  PROMETHEUS_NAME_PATTERN = %r{^[a-z][a-z0-9_]*$}
+  PROMETHEUS_LABEL_PATTERN = %r{^[a-z][a-z0-9_]*$}
+  DANGEROUS_PQL_PATTERNS = [
+    /;/,
+    /\b(DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE)\b/i,
+    /--/,
+    %r{/\*},
+  ].freeze
+  ISO8601_TIMESTAMP_PATTERN = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?/
+
   def generate_metrics
     @logger.info("Starting Puppet metrics collection...")
 
@@ -1029,7 +1083,16 @@ class PrometheusMetricsGenerator
 
     return unless config && config['metrics'].is_a?(Array)
 
-    @custom_metric_definitions = config['metrics']
+    # Validate all definitions upfront before any API calls (D-01, D-05)
+    result = validate_custom_metric_definitions(config['metrics'])
+    @custom_metric_definitions = result[:valid]
+
+    # Sanitise PQL timestamps in valid definitions (D-18)
+    @custom_metric_definitions.each do |defn|
+      next unless defn['endpoint'] == 'pql' && defn['pql_query']
+      defn['pql_query'] = sanitise_pql_timestamp(defn['pql_query'], defn['name'])
+    end
+
     @custom_metric_definitions.each do |defn|
       collect_single_custom_metric(defn)
     end
@@ -1039,10 +1102,6 @@ class PrometheusMetricsGenerator
 
   def collect_single_custom_metric(defn)
     name = defn['name']
-    unless name && !name.empty?
-      @logger.warn("Skipping custom metric with missing name")
-      return
-    end
 
     begin
       rows = fetch_custom_metric_data(defn)
@@ -1170,6 +1229,153 @@ class PrometheusMetricsGenerator
       }
     end
     headers
+  end
+
+  # Validate all custom metric definitions upfront before collection (D-01, D-05)
+  def validate_custom_metric_definitions(definitions)
+    valid = []
+    errors = []
+    seen_names = Set.new
+
+    definitions.each_with_index do |defn, idx|
+      issues = validate_single_definition(defn, idx, seen_names)
+      if issues.empty?
+        valid << defn
+        seen_names.add(defn['name'])
+      else
+        issues.each { |msg| @logger.warn(msg) }
+        errors.concat(issues)
+      end
+    end
+
+    @logger.info(
+      "#{valid.length}/#{definitions.length} custom metrics valid, " \
+      "#{definitions.length - valid.length} skipped" \
+      "#{errors.empty? ? '' : ' (see warnings above)'}"
+    )
+
+    { valid: valid, errors: errors }
+  end
+
+  # Validate a single metric definition against schema, naming, and safety rules
+  def validate_single_definition(defn, index, seen_names)
+    errors = []
+    label = "Custom metric definition ##{index + 1}"
+
+    # Schema validation: required fields (D-02)
+    %w[name endpoint type help].each do |field|
+      errors << "#{label}: missing required field '#{field}'" unless defn[field] && !defn[field].to_s.strip.empty?
+    end
+    return errors unless errors.empty?
+
+    name = defn['name']
+
+    # Prometheus naming rules (D-09)
+    unless name.match?(PROMETHEUS_NAME_PATTERN)
+      errors << "#{label} '#{name}': invalid metric name (must match /^[a-z][a-z0-9_]*$/)"
+    end
+
+    # Prefix enforcement (D-06)
+    unless name.start_with?('puppet_custom_')
+      errors << "#{label} '#{name}': must start with 'puppet_custom_' prefix"
+    end
+
+    # Built-in collision detection (D-06)
+    if BUILTIN_METRIC_PREFIXES.include?(name)
+      errors << "#{label} '#{name}': collides with built-in metric name"
+    end
+
+    # Duplicate detection (D-07)
+    if seen_names.include?(name)
+      errors << "#{label} '#{name}': duplicate metric name (already defined)"
+    end
+
+    # Endpoint type validation (D-03)
+    unless VALID_ENDPOINT_TYPES.include?(defn['endpoint'])
+      errors << "#{label} '#{name}': unknown endpoint '#{defn['endpoint']}' (valid: #{VALID_ENDPOINT_TYPES.join(', ')})"
+    end
+
+    # Endpoint-specific field validation (D-02)
+    case defn['endpoint']
+    when 'fact'
+      errors << "#{label} '#{name}': fact endpoint requires 'fact_name'" unless defn['fact_name']
+    when 'pql'
+      errors << "#{label} '#{name}': pql endpoint requires 'pql_query'" unless defn['pql_query']
+      errors.concat(validate_pql_query(defn['pql_query'], label, name)) if defn['pql_query']
+    when 'resource'
+      errors << "#{label} '#{name}': resource endpoint requires 'resource_type'" unless defn['resource_type']
+    end
+
+    # Prometheus type validation
+    unless VALID_METRIC_TYPES.include?(defn['type'])
+      errors << "#{label} '#{name}': invalid metric type '#{defn['type']}' (valid: #{VALID_METRIC_TYPES.join(', ')})"
+    end
+
+    # Label name validation (D-10)
+    if defn['labels'].is_a?(Hash)
+      defn['labels'].each_key do |label_name|
+        unless label_name.match?(PROMETHEUS_LABEL_PATTERN) && !label_name.start_with?('__')
+          errors << "#{label} '#{name}': invalid label name '#{label_name}'"
+        end
+      end
+    end
+
+    # Value field and label path validation (CUST-06)
+    if defn['value_field'] && defn['value_field'].to_s.strip.empty?
+      errors << "#{label} '#{name}': value_field must be a non-empty string"
+    end
+
+    if defn['labels'].is_a?(Hash)
+      defn['labels'].each do |lbl_name, lbl_path|
+        if lbl_path.to_s.strip.empty?
+          errors << "#{label} '#{name}': label '#{lbl_name}' path must be a non-empty string"
+        end
+      end
+    end
+
+    errors
+  end
+
+  # Validate PQL query for safety issues (D-16, D-17)
+  def validate_pql_query(query, label, name)
+    errors = []
+
+    # Empty string check (D-16)
+    if query.strip.empty?
+      errors << "#{label} '#{name}': pql_query cannot be empty"
+      return errors
+    end
+
+    # Unbalanced quotes (D-16)
+    if query.count('"').odd? || query.count("'").odd?
+      errors << "#{label} '#{name}': pql_query has unbalanced quotes"
+    end
+
+    # Dangerous patterns (D-17)
+    DANGEROUS_PQL_PATTERNS.each do |pattern|
+      if query.match?(pattern)
+        errors << "#{label} '#{name}': pql_query contains suspicious pattern '#{pattern.source}'"
+      end
+    end
+
+    errors
+  end
+
+  # Strip hardcoded ISO8601 timestamps from PQL queries (D-18)
+  def sanitise_pql_timestamp(query, name)
+    if query.match?(ISO8601_TIMESTAMP_PATTERN)
+      @logger.warn(
+        "Custom metric '#{name}': PQL query contains hardcoded timestamp " \
+        "(likely pasted from chatbot). Stripping timestamp comparison."
+      )
+      sanitised = query.gsub(
+        /\s+and\s+\w+_timestamp\s*[<>=!]+\s*"[^"]*"/i,
+        ''
+      )
+      sanitised.strip
+    else
+      query
+    end
   end
 
   def output_metrics
