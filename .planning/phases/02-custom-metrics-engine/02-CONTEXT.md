@@ -39,11 +39,22 @@ Build the YAML-to-Prometheus pipeline with validation, safety guards, and dot-pa
 - **D-17:** Basic sanitisation for PQL queries: reject queries containing semicolons or common SQL injection patterns. Defence in depth even though PQL is not SQL.
 - **D-18:** Detect hardcoded ISO8601 timestamps in PQL queries during validation. Warn the user that the query contains stale dates (likely pasted from the Infra Assistant chatbot), then strip the timestamp comparison clause before sending to PuppetDB. Most chatbot PQL timeframes are irrelevant for ongoing collection — the query should reflect current state, not a point-in-time snapshot.
 
+### CLI Tool (Metric Builder)
+- **D-19:** Provide a CLI tool (`puppet_custom_metric_builder`) that guides users through adding a metric to the YAML config file. Accepts inputs interactively or via flags, validates everything upfront, and writes the validated definition to the YAML file.
+- **D-20:** CLI validates the same rules as the runtime validator (schema, name collisions, Prometheus naming, PQL basic checks, timestamp detection). Single source of truth — both CLI and runtime use the same validation logic.
+- **D-21:** CLI shows a preview of what the Prometheus exposition output will look like before writing to the YAML file. Includes HELP/TYPE headers and sample metric lines with placeholder label values, so the user can see exactly what they'll get.
+- **D-22:** CLI can query PuppetDB live (using the same SSL cert auth) to fetch a sample result from the PQL query, then render a realistic preview with actual data rather than placeholders.
+- **D-23:** CLI installed alongside the main script at `/opt/puppetlabs/puppet_data_connector_enhancer/puppet_custom_metric_builder`. Uses the same PE Ruby shebang. Deployed via Puppet file resource in init.pp.
+- **D-24:** CLI supports both interactive mode (prompts for each field) and flag mode (`--name`, `--endpoint`, `--pql-query`, `--help-text`, `--labels`, `--value-path`, `--row-limit`) for scripting.
+
 ### Claude's Discretion
 - Exact validation error message wording
 - How the nodes endpoint convenience type maps to PuppetDB API parameters
 - Ruby-side truncation implementation details for the row limit fallback
 - Specific SQL injection patterns to check for in basic sanitisation
+- CLI interactive prompt UX details (colours, progress indicators)
+- CLI error output formatting
+- Whether the CLI preview uses table format or raw Prometheus exposition format
 
 </decisions>
 
@@ -104,6 +115,7 @@ Build the YAML-to-Prometheus pipeline with validation, safety guards, and dot-pa
 <deferred>
 ## Deferred Ideas
 
+- CLI advanced features (metric deletion, listing, editing existing entries) — keep the CLI focused on add+preview for now
 - EPP quote escaping for the custom_queries inline parameter — deferred to polish phase or backlog
 - Deprecating custom_queries parameter in favour of custom_queries_file — considered but not actioned
 - Ruby unit tests for collection logic (D-08 from Phase 1) — still deferred until codebase stabilises
