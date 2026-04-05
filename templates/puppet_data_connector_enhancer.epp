@@ -9,6 +9,9 @@
       String $cd4pe_server,
       String $scm_dir,
       String $custom_queries_file,
+      Boolean $enable_orchestrator_metrics,
+      Integer $orchestrator_jobs_limit,
+      Boolean $enable_classification_metrics,
 | -%>
 #!/opt/puppetlabs/puppet/bin/ruby
 
@@ -62,6 +65,17 @@ class PrometheusMetricsGenerator
     collect_with_error_handling('cis_score') { collect_cis_score }
     collect_with_error_handling('scm_export_health') { collect_scm_export_health }
     collect_with_error_handling('infrastructure_config') { collect_infrastructure_config }
+
+    if @config[:enable_orchestrator_metrics]
+      collect_with_error_handling('orchestrator_jobs') { collect_orchestrator_jobs }
+      collect_with_error_handling('orchestrator_plans') { collect_orchestrator_plans }
+    end
+
+    if @config[:enable_classification_metrics]
+      collect_with_error_handling('node_groups') { collect_node_groups }
+      collect_with_error_handling('class_usage') { collect_class_usage }
+    end
+
     collect_with_error_handling('custom_metrics') { collect_custom_metrics }
 
     output_metrics
@@ -90,7 +104,19 @@ class PrometheusMetricsGenerator
       scm_server: '<%= $scm_server %>',
       grafana_server: '<%= $grafana_server %>',
       cd4pe_server: '<%= $cd4pe_server %>',
-      custom_queries_file: ENV['CUSTOM_QUERIES_FILE'] || '<%= $custom_queries_file %>'
+      custom_queries_file: ENV['CUSTOM_QUERIES_FILE'] || '<%= $custom_queries_file %>',
+      enable_orchestrator_metrics: ENV['ENABLE_ORCHESTRATOR_METRICS'] == 'true' || <%= $enable_orchestrator_metrics %>,
+      orchestrator_host: ENV['ORCHESTRATOR_HOST'] || '<%= $puppet_server %>',
+      orchestrator_port: ENV['ORCHESTRATOR_PORT']&.to_i || 8143,
+      orchestrator_protocol: ENV['ORCHESTRATOR_PROTOCOL'] || 'https',
+      orchestrator_jobs_limit: ENV['ORCHESTRATOR_JOBS_LIMIT']&.to_i || <%= $orchestrator_jobs_limit %>,
+      ssl_cert_file: ENV['SSL_CERT_FILE'] || '/etc/puppetlabs/puppet/ssl/certs/<%= $puppet_server %>.pem',
+      ssl_key_file: ENV['SSL_KEY_FILE'] || '/etc/puppetlabs/puppet/ssl/private_keys/<%= $puppet_server %>.pem',
+      ssl_ca_file: ENV['SSL_CA_FILE'] || '/etc/puppetlabs/puppet/ssl/certs/ca.pem',
+      enable_classification_metrics: ENV['ENABLE_CLASSIFICATION_METRICS'] == 'true' || <%= $enable_classification_metrics %>,
+      classifier_host: ENV['CLASSIFIER_HOST'] || '<%= $puppet_server %>',
+      classifier_port: ENV['CLASSIFIER_PORT']&.to_i || 4433,
+      classifier_protocol: ENV['CLASSIFIER_PROTOCOL'] || 'https'
     }
   end
 
@@ -101,6 +127,14 @@ class PrometheusMetricsGenerator
 
   def infra_assistant_base_url
     "#{@config[:infra_assistant_protocol]}://#{@config[:infra_assistant_host]}:#{@config[:infra_assistant_port]}"
+  end
+
+  def orchestrator_base_url
+    "#{@config[:orchestrator_protocol]}://#{@config[:orchestrator_host]}:#{@config[:orchestrator_port]}"
+  end
+
+  def classifier_base_url
+    "#{@config[:classifier_protocol]}://#{@config[:classifier_host]}:#{@config[:classifier_port]}"
   end
 
   # Metric formatting and sanitization methods
@@ -317,6 +351,81 @@ class PrometheusMetricsGenerator
       @logger.info("Infrastructure config: #{labels.map { |k, v| "#{k}=#{v}" }.join(', ')}")
     else
       @logger.warn("No infrastructure config parameters provided, skipping metric")
+    end
+  end
+
+  # HTTP client for Orchestrator API with client certificate authentication
+  def fetch_json_from_orchestrator(uri_str, params = {})
+    uri = URI(uri_str)
+    uri.query = URI.encode_www_form(params) unless params.empty?
+
+    retries = @config[:http_retries] || 3
+    retry_delay = @config[:retry_delay] || 2
+
+    begin
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.open_timeout = @config[:http_timeout]
+      http.read_timeout = @config[:http_timeout]
+      http.use_ssl = true
+      http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+      http.cert = OpenSSL::X509::Certificate.new(File.read(@config[:ssl_cert_file]))
+      http.key = OpenSSL::PKey::RSA.new(File.read(@config[:ssl_key_file]))
+      http.ca_file = @config[:ssl_ca_file]
+
+      request = Net::HTTP::Get.new(uri.request_uri)
+      request['User-Agent'] = 'puppet-data-connector-enhancer/1.0'
+
+      @logger.debug("Making orchestrator request to: #{uri}")
+      response = http.request(request)
+
+      if response.is_a?(Net::HTTPSuccess)
+        begin
+          parsed_data = JSON.parse(response.body)
+          @logger.debug("Successfully parsed orchestrator response from #{uri.path}")
+          return parsed_data
+        rescue JSON::ParserError => e
+          error_msg = "Invalid JSON response from #{uri}: #{e.message}"
+          @logger.error(error_msg)
+          record_collection_error(error_msg, uri.to_s, response.code)
+          raise MetricsCollectionError.new(error_msg, uri.to_s, response.code)
+        end
+      else
+        error_msg = "HTTP #{response.code}: #{response.message}"
+        @logger.error("Orchestrator request failed: #{error_msg} for #{uri}")
+        @logger.debug("Response body: #{response.body[0..500]}") if response.body
+        record_collection_error(error_msg, uri.to_s, response.code)
+        raise MetricsCollectionError.new(error_msg, uri.to_s, response.code)
+      end
+
+    rescue Net::TimeoutError, Net::OpenTimeout, Net::ReadTimeout => e
+      error_msg = "Timeout during orchestrator request to #{uri}: #{e.message}"
+      @logger.error(error_msg)
+      record_collection_error(error_msg, uri.to_s)
+      raise MetricsCollectionError.new(error_msg, uri.to_s)
+
+    rescue Errno::ECONNREFUSED => e
+      error_msg = "Connection refused to #{uri.host}:#{uri.port}"
+      @logger.error(error_msg)
+      record_collection_error(error_msg, uri.to_s)
+      raise MetricsCollectionError.new(error_msg, uri.to_s)
+
+    rescue StandardError => e
+      error_msg = "Unexpected error: #{e.class.name}: #{e.message}"
+      @logger.error("#{error_msg} for #{uri}")
+      record_collection_error(error_msg, uri.to_s)
+      raise MetricsCollectionError.new(error_msg, uri.to_s)
+    end
+
+  rescue MetricsCollectionError => e
+    retries -= 1
+    if retries > 0
+      @logger.warn("Orchestrator request failed, retrying in #{retry_delay}s (#{retries} attempts left): #{e.message}")
+      sleep(retry_delay)
+      retry_delay *= 1.5
+      retry
+    else
+      @logger.error("Orchestrator request failed after all retries: #{e.message}")
+      raise e
     end
   end
 
@@ -601,6 +710,250 @@ class PrometheusMetricsGenerator
     end
 
     @logger.debug("Collected CIS compliance scores for #{cis_data.length} nodes")
+  end
+
+  def collect_orchestrator_jobs
+    limit = @config[:orchestrator_jobs_limit]
+    uri = "#{orchestrator_base_url}/orchestrator/v1/jobs"
+    data = fetch_json_from_orchestrator(uri, { 'limit' => limit, 'order' => 'desc' })
+
+    items = data['items'] || []
+    state_counts = Hash.new(0)
+
+    items.each do |job|
+      job_id = job['name'].to_s
+      task_name = job.dig('options', 'task') || job['command'] || 'unknown'
+      env_raw = job['environment']
+      environment = env_raw.is_a?(Hash) ? (env_raw['name'] || 'unknown') : (env_raw || 'unknown')
+      owner = job.dig('owner', 'login') || 'unknown'
+      state = job['state'] || 'unknown'
+      duration = job['duration']
+      node_count = job['node_count']
+      created_timestamp = job['created_timestamp']
+
+      state_counts[state] += 1
+
+      # Info metric (presence, value=1)
+      add_metric('puppet_orchestrator_job_info', {
+        job_id: job_id,
+        task_name: task_name,
+        command: job['command'] || 'unknown',
+        environment: environment,
+        owner: owner,
+        state: state
+      }, 1)
+
+      # Duration (only for completed jobs with a final duration)
+      if duration && duration.is_a?(Numeric) && duration > 0
+        add_metric('puppet_orchestrator_job_duration_seconds', {
+          job_id: job_id,
+          task_name: task_name
+        }, duration.round(3))
+      end
+
+      # Start timestamp
+      if created_timestamp
+        begin
+          ts = Time.parse(created_timestamp).to_i
+          add_metric('puppet_orchestrator_job_start_timestamp', {
+            job_id: job_id,
+            task_name: task_name
+          }, ts)
+        rescue ArgumentError
+          @logger.warn("Invalid timestamp for job #{job_id}: #{created_timestamp}")
+        end
+      end
+
+      # Node count
+      if node_count && node_count.is_a?(Numeric)
+        add_metric('puppet_orchestrator_job_node_count', {
+          job_id: job_id,
+          task_name: task_name
+        }, node_count)
+      end
+    end
+
+    # Aggregate status totals
+    state_counts.each do |state, count|
+      add_metric('puppet_orchestrator_job_status_total', { state: state }, count)
+    end
+
+    @logger.info("Collected orchestrator job metrics for #{items.length} jobs")
+  end
+
+  def collect_orchestrator_plans
+    limit = @config[:orchestrator_jobs_limit]
+    uri = "#{orchestrator_base_url}/orchestrator/v1/plan_jobs"
+    data = fetch_json_from_orchestrator(uri, { 'limit' => limit, 'order' => 'desc' })
+
+    items = data['items'] || []
+    state_counts = Hash.new(0)
+
+    items.each do |plan|
+      job_id = plan['name'].to_s
+      plan_name = plan.dig('options', 'plan_name') || 'unknown'
+      environment = plan['environment'] || 'unknown'
+      owner = plan.dig('owner', 'login') || 'unknown'
+      state = plan['state'] || 'unknown'
+      duration = plan['duration']
+      created_timestamp = plan['created_timestamp']
+
+      state_counts[state] += 1
+
+      # Info metric (presence, value=1)
+      add_metric('puppet_orchestrator_plan_info', {
+        job_id: job_id,
+        plan_name: plan_name,
+        environment: environment,
+        owner: owner,
+        state: state
+      }, 1)
+
+      # Duration (only for completed plans with a final duration)
+      if duration && duration.is_a?(Numeric) && duration > 0
+        add_metric('puppet_orchestrator_plan_duration_seconds', {
+          job_id: job_id,
+          plan_name: plan_name
+        }, duration.round(3))
+      end
+
+      # Start timestamp
+      if created_timestamp
+        begin
+          ts = Time.parse(created_timestamp).to_i
+          add_metric('puppet_orchestrator_plan_start_timestamp', {
+            job_id: job_id,
+            plan_name: plan_name
+          }, ts)
+        rescue ArgumentError
+          @logger.warn("Invalid timestamp for plan #{job_id}: #{created_timestamp}")
+        end
+      end
+    end
+
+    # Aggregate status totals
+    state_counts.each do |state, count|
+      add_metric('puppet_orchestrator_plan_status_total', { state: state }, count)
+    end
+
+    @logger.info("Collected orchestrator plan metrics for #{items.length} plans")
+  end
+
+  def collect_node_groups
+    uri = "#{classifier_base_url}/classifier-api/v1/groups"
+    groups = fetch_json_from_orchestrator(uri)
+
+    return unless groups && groups.is_a?(Array)
+
+    # Build lookup maps: UUID -> group data, UUID -> children
+    by_uuid = {}
+    children = Hash.new { |h, k| h[k] = [] }
+    root_groups = []
+
+    groups.each do |group|
+      by_uuid[group['id']] = group
+      parent_uuid = group['parent']
+      if parent_uuid && parent_uuid != group['id']
+        children[parent_uuid] << group
+      else
+        root_groups << group
+      end
+    end
+
+    # Sort children alphabetically at each level for consistent output
+    children.each_value { |c| c.sort_by! { |g| (g['name'] || '').downcase } }
+    root_groups.sort_by! { |g| (g['name'] || '').downcase }
+
+    # DFS traversal to emit metrics in tree order with display names
+    sort_order = 0
+    stack = root_groups.reverse.map { |g| [g, 0, ''] }
+
+    while !stack.empty?
+      group, depth, prefix = stack.pop
+      sort_order += 1
+      title = group['name'] || 'unknown'
+      environment = group['environment'] || 'production'
+      classes = group['classes'] || {}
+      class_count = classes.length
+      rule = group['rule']
+      parent_uuid = group['parent']
+      parent_group = by_uuid[parent_uuid]
+      parent_name = parent_group ? (parent_group['name'] || '') : ''
+      child_groups = children[group['id']] || []
+
+      # Build tree-indented display name
+      display_name = if depth == 0
+                       title
+                     else
+                       "#{prefix}#{title}"
+                     end
+
+      # Node group info metric - value is class count for meaningful aggregation
+      add_metric('puppet_node_group_info', {
+        group_uuid: group['id'],
+        group_name: title,
+        display_name: display_name,
+        sort_order: format('%03d', sort_order),
+        environment: environment,
+        parent_group: parent_name,
+        depth: depth.to_s,
+        has_rules: (rule && rule.length > 0 ? 'yes' : 'no')
+      }, class_count)
+
+      # Edge metric for hierarchy relationships
+      if parent_uuid && parent_uuid != group['id']
+        add_metric('puppet_node_group_edge', {
+          source_name: parent_name,
+          target_name: title
+        }, 1)
+      end
+
+      # Push children onto stack in reverse order (so first child is processed first)
+      # Calculate the prefix for children based on whether this node is the last sibling
+      child_groups.reverse.each_with_index do |child, idx|
+        child_is_last = (idx == 0) # reversed, so index 0 is actually last child
+        if depth == 0
+          child_prefix = child_is_last ? '└─ ' : '├─ '
+        else
+          # Extend prefix: if current node used └─, children get spaces; if ├─, children get │
+          parent_continuation = prefix.end_with?('└─ ') ? '   ' : '│  '
+          child_prefix = parent_continuation + (child_is_last ? '└─ ' : '├─ ')
+        end
+        stack.push([child, depth + 1, child_prefix])
+      end
+    end
+
+    @logger.info("Collected node group metrics for #{groups.length} groups")
+  end
+
+  def collect_class_usage
+    uri = "#{puppetdb_base_url}/pdb/query/v4"
+    params = { 'query' => 'resources[certname, title] { type = "Class" }' }
+    class_resources = fetch_json_from_puppetdb(uri, params)
+
+    return unless class_resources && class_resources.is_a?(Array)
+
+    # Aggregate: count nodes per class and classes per node
+    # Filter out Puppet internal classes that are applied to every node
+    internal_classes = %w[settings main].freeze
+    class_counts = Hash.new(0)
+    node_class_counts = Hash.new(0)
+    class_resources.each do |entry|
+      next unless entry && entry['title']
+      next if internal_classes.include?(entry['title'].downcase)
+      class_counts[entry['title']] += 1
+      node_class_counts[entry['certname']] += 1 if entry['certname']
+    end
+
+    class_counts.each do |class_name, count|
+      add_metric('puppet_class_usage_total', { class_name: class_name }, count)
+    end
+
+    node_class_counts.each do |certname, count|
+      add_metric('puppet_classes_per_node', { node: certname }, count)
+    end
+
+    @logger.info("Collected class usage metrics for #{class_counts.length} unique classes across #{node_class_counts.length} nodes")
   end
 
   def collect_scm_export_health
@@ -954,7 +1307,73 @@ class PrometheusMetricsGenerator
         help: 'Infrastructure server configuration metadata for Grafana dashboard filters',
         type: 'gauge'
       },
+    }
 
+    # Orchestrator metrics (conditional on feature flag)
+    if @config[:enable_orchestrator_metrics]
+      header_metrics.merge!({
+        'puppet_orchestrator_job_info' => {
+          help: 'PE Orchestrator job presence metric with metadata labels',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_job_duration_seconds' => {
+          help: 'Duration of completed PE Orchestrator jobs in seconds',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_job_start_timestamp' => {
+          help: 'Unix timestamp when the PE Orchestrator job started',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_job_node_count' => {
+          help: 'Number of nodes targeted by each PE Orchestrator job',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_job_status_total' => {
+          help: 'Aggregate count of PE Orchestrator jobs by state',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_plan_info' => {
+          help: 'PE Orchestrator plan run presence metric with metadata labels',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_plan_duration_seconds' => {
+          help: 'Duration of completed PE Orchestrator plan runs in seconds',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_plan_start_timestamp' => {
+          help: 'Unix timestamp when the PE Orchestrator plan run started',
+          type: 'gauge'
+        },
+        'puppet_orchestrator_plan_status_total' => {
+          help: 'Aggregate count of PE Orchestrator plan runs by state',
+          type: 'gauge'
+        }
+      })
+    end
+
+    # Classification metrics (conditional on feature flag)
+    if @config[:enable_classification_metrics]
+      header_metrics.merge!({
+        'puppet_node_group_info' => {
+          help: 'Node group classification info with tree hierarchy - value is class count',
+          type: 'gauge'
+        },
+        'puppet_node_group_edge' => {
+          help: 'Node group parent-child relationship edges',
+          type: 'gauge'
+        },
+        'puppet_class_usage_total' => {
+          help: 'Number of nodes using each Puppet class',
+          type: 'gauge'
+        },
+        'puppet_classes_per_node' => {
+          help: 'Number of Puppet classes applied to each node',
+          type: 'gauge'
+        }
+      })
+    end
+
+    header_metrics.merge!({
       # Exporter health metrics
       'puppet_exporter_collection_failed' => {
         help: 'Failed data collection attempts by collection type and error',
@@ -972,7 +1391,7 @@ class PrometheusMetricsGenerator
         help: 'Timestamp of the last metrics collection attempt',
         type: 'gauge'
       }
-    }
+    })
 
     header_metrics.each do |name, info|
       header_lines << "# HELP #{name} #{info[:help]}"
