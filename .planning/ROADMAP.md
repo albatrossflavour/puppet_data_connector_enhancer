@@ -33,11 +33,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 4. Orchestrator and classification collection is off by default and toggleable via class parameters
 5. Tests validate orchestrator and classification metric collection, including error scenarios
 
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
 
-- [ ] 01-01: TBD
+- [ ] 01-01-PLAN.md -- Apply orchestrator and classification code from feature branch to all four target files
+- [ ] 01-02-PLAN.md -- Apply test contexts and validate full rspec-puppet suite passes
 
 ### Phase 2: Custom Metrics Engine
 
@@ -103,7 +104,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Orchestrator and Classification Metrics | 0/0 | Not started | - |
+| 1. Orchestrator and Classification Metrics | 0/2 | Planning complete | - |
 | 2. Custom Metrics Engine | 0/0 | Not started | - |
 | 3. Dashboards and Self-Monitoring | 0/0 | Not started | - |
 | 4. Documentation and Alert Rules | 0/0 | Not started | - |
