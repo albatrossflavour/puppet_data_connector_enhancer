@@ -57,9 +57,9 @@ Plans:
 
 Plans:
 
-- [ ] 02-01-PLAN.md -- Validation engine, row limits, and nodes endpoint in EPP template and manifests
-- [ ] 02-02-PLAN.md -- CLI metric builder tool (interactive and flag modes with live PuppetDB preview)
-- [ ] 02-03-PLAN.md -- rspec-puppet tests for custom metrics validation, CLI deployment, and CUST-05
+- [x] 02-01-PLAN.md -- Validation engine, row limits, and nodes endpoint in EPP template and manifests
+- [x] 02-02-PLAN.md -- CLI metric builder tool (interactive and flag modes with live PuppetDB preview)
+- [x] 02-03-PLAN.md -- rspec-puppet tests for custom metrics validation, CLI deployment, and CUST-05
 
 ### Phase 3: Dashboards and Self-Monitoring
 
