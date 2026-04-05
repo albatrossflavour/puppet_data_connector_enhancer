@@ -387,7 +387,7 @@ git apply --3way /tmp/patch-init.pp.patch
 | A1 | PE Orchestrator API on port 8143 by default | API Endpoints | Env var override mitigates |
 | A2 | Node Classifier API on port 4433 by default | API Endpoints | Env var override mitigates |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Metric name discrepancy between D-09 and code**
    - What we know: D-09 says `puppet_orchestrator_jobs_by_state` but code uses
@@ -395,6 +395,7 @@ git apply --3way /tmp/patch-init.pp.patch
      code uses `puppet_class_usage_total`.
    - What is unclear: Whether D-09 was written from memory or from the code
    - Recommendation: Ship the code's names (D-09 says "as-is" meaning the code)
+   - RESOLVED: Code names are authoritative per D-09 intent. Ship `puppet_orchestrator_job_status_total` and `puppet_class_usage_total`.
 
 ## Sources
 
