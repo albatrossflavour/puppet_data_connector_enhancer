@@ -53,11 +53,13 @@ Plans:
 4. Each custom metric respects a configurable row limit, preventing cardinality explosion from broad queries
 5. Dot-path JSON extraction works for nested values, producing correct Prometheus labels
 
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
 
-- [ ] 02-01: TBD
+- [ ] 02-01-PLAN.md -- Validation engine, row limits, and nodes endpoint in EPP template and manifests
+- [ ] 02-02-PLAN.md -- CLI metric builder tool (interactive and flag modes with live PuppetDB preview)
+- [ ] 02-03-PLAN.md -- rspec-puppet tests for custom metrics validation, CLI deployment, and CUST-05
 
 ### Phase 3: Dashboards and Self-Monitoring
 
@@ -105,6 +107,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Orchestrator and Classification Metrics | 0/2 | Planning complete | - |
-| 2. Custom Metrics Engine | 0/0 | Not started | - |
+| 2. Custom Metrics Engine | 0/3 | Planning complete | - |
 | 3. Dashboards and Self-Monitoring | 0/0 | Not started | - |
 | 4. Documentation and Alert Rules | 0/0 | Not started | - |
