@@ -23,17 +23,21 @@ Users can turn any PQL query into an ongoing Prometheus metric with a matching G
 - ✓ Class usage metrics (count of nodes per class) — Validated in Phase 1
 - ✓ Test coverage for orchestrator and classification metrics — Validated in Phase 1
 - ✓ Merge feature/orchestrator-metrics branch work — Validated in Phase 1
+- ✓ Custom metrics YAML config system (5 endpoint types: fact, pql, resource, inventory, nodes) — Validated in Phase 2
+- ✓ Dot-path JSON extraction for nested values as Prometheus labels — Validated in Phase 2
+- ✓ HELP/TYPE header generation for custom metrics — Validated in Phase 2
+- ✓ Schema validation with actionable error messages — Validated in Phase 2
+- ✓ Metric name collision detection and puppet_custom_ prefix enforcement — Validated in Phase 2
+- ✓ Configurable per-metric row limits with PuppetDB API enforcement — Validated in Phase 2
+- ✓ PQL sanitisation with timestamp stripping — Validated in Phase 2
+- ✓ CLI metric builder tool with preview — Validated in Phase 2
+- ✓ Test coverage for error scenarios (bad YAML, missing config, API failures) — Validated in Phase 2
 
 ### Active
-
-- [ ] Custom metrics YAML config system (4 endpoint types: fact, pql, resource, inventory)
-- [ ] Dot-path JSON extraction for nested values as Prometheus labels
-- [ ] HELP/TYPE header generation for custom metrics
 - [ ] Auto-generated Grafana dashboard JSON for each custom metric definition
 - [ ] Prometheus alert rules examples for all metrics
 - [ ] Updated README with custom queries usage guide and YAML format reference
 - [ ] Updated REFERENCE.md with all new parameters
-- [ ] Test coverage for error scenarios (bad YAML, missing config, API failures)
 - [ ] Self-monitoring metrics: collection script resource usage (CPU, memory, wall time)
 - [ ] Self-monitoring metrics: API call counts and durations per endpoint (PuppetDB, Orchestrator, Classifier)
 - [ ] Self-monitoring metrics: collection health (success/failure rates, timeouts, error counts per run)
@@ -51,6 +55,7 @@ Users can turn any PQL query into an ongoing Prometheus metric with a matching G
 - This is a brownfield Puppet module (Ruby/Puppet DSL) published on the Puppet Forge
 - The custom metrics YAML system is partially implemented on the `self_service_graphs` branch
 - Orchestrator/classification metrics merged from `feature/orchestrator-metrics` in Phase 1 (1444 tests passing)
+- Phase 2 complete — validation engine, CLI metric builder, row limits, PQL sanitisation, 1426 tests passing
 - The module runs on the Puppet server, authenticating to PuppetDB, Orchestrator, and Classifier APIs via SSL client certificates
 - Grafana dashboards are currently shipped as static JSON files in the module
 - Users discover useful PQL queries via the Puppet Infra Assistant chatbot, which shows the PQL that produced results
