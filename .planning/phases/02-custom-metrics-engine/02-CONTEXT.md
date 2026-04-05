@@ -37,6 +37,7 @@ Build the YAML-to-Prometheus pipeline with validation, safety guards, and dot-pa
 - **D-15:** Phase 2 focuses on the YAML file path (custom_queries_file) only. The custom_queries inline Puppet parameter has an EPP escaping risk but is deferred to a polish phase or backlog.
 - **D-16:** Basic PQL checks: reject empty strings and unbalanced quotes. Let PuppetDB handle full PQL syntax validation via its error responses.
 - **D-17:** Basic sanitisation for PQL queries: reject queries containing semicolons or common SQL injection patterns. Defence in depth even though PQL is not SQL.
+- **D-18:** Detect hardcoded ISO8601 timestamps in PQL queries during validation. Warn the user that the query contains stale dates (likely pasted from the Infra Assistant chatbot), then strip the timestamp comparison clause before sending to PuppetDB. Most chatbot PQL timeframes are irrelevant for ongoing collection — the query should reflect current state, not a point-in-time snapshot.
 
 ### Claude's Discretion
 - Exact validation error message wording
