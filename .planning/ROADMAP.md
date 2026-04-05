@@ -37,8 +37,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 Plans:
 
-- [ ] 01-01-PLAN.md -- Apply orchestrator and classification code from feature branch to all four target files
-- [ ] 01-02-PLAN.md -- Apply test contexts and validate full rspec-puppet suite passes
+- [x] 01-01-PLAN.md -- Apply orchestrator and classification code from feature branch to all four target files
+- [x] 01-02-PLAN.md -- Apply test contexts and validate full rspec-puppet suite passes
 
 ### Phase 2: Custom Metrics Engine
 
